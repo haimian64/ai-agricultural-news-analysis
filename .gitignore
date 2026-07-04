@@ -1,0 +1,15 @@
+﻿__pycache__/
+*.pyc
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+env/
+venv/
+.DS_Store
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/raw/news/*.json
