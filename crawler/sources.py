@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 
 @dataclass
 class NewsSource:
@@ -111,6 +111,6 @@ DISASTER_SOURCES = [
     DisasterSource(name="水利部-水旱灾害防御", url="http://www.mwr.gov.cn/xw/slyw/",
                    region="全国", selector="ul li"),
     # 自然资源部 - 地质灾害预警
-    DisasterSource(name="自然资源部-地质灾害", url="https://www.mnr.gov.cn/dt/zhfp/",
+    DisasterSource(name="自然资源部-地质灾害", url="http://www.mnr.gov.cn/dt/zhfp/",
                    region="全国", selector="ul li"),
 ]

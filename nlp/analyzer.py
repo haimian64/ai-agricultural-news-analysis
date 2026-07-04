@@ -3,6 +3,7 @@ Hot Topic Analyzer - Keyword extraction, category/sentiment distribution, trend 
 """
 import logging
 import re
+import jieba
 from collections import Counter, defaultdict
 from datetime import datetime
 
@@ -12,19 +13,20 @@ class HotTopicAnalyzer:
     """Hot topic and trend analyzer"""
 
     def extract_keywords(self, texts, top_k=20):
-        """Simple TF-based Chinese keyword extraction"""
+        """TF-based keyword extraction using jieba segmentation"""
         combined = " ".join(texts) if isinstance(texts, list) else texts
         if not combined:
             return []
 
         words = []
-        for w in re.split(r"[\s,.!?;:，。！？；：、()（）\[\]【】]+", combined):
+        for w in re.split(r"[\s,.!?;:　、，。！？；：、（）〔〕【】]+", combined):
             if not w:
                 continue
-            # Chinese bigram tokenizer
+            # Jieba word segmentation (proper Chinese word boundaries)
             if re.match(r"^[\u4e00-\u9fff]+$", w):
-                for i in range(len(w) - 1):
-                    words.append(w[i:i+2])
+                for seg in jieba.cut(w):
+                    if len(seg) >= 2:
+                        words.append(seg)
             elif len(w) > 2:
                 words.append(w)
 

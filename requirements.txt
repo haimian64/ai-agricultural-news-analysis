@@ -3,11 +3,11 @@
 aiohttp>=3.9.0
 lxml>=4.9.0
 cssselect>=1.2.0
+jieba>=0.42.0
 
 # 可选依赖（无网络环境也可运行，只是降级为规则模式）
 # transformers>=4.30.0  # BERT/T5模型（设置 MODEL_MODE=local 时使用）
 # torch>=2.0.0          # PyTorch（同上）
-# jieba>=0.42.0         # 中文分词（有则用，无则使用内置分词器）
 
 # 数据分析（可视化生成用，不影响核心功能）
 matplotlib>=3.7.0

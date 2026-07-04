@@ -22,7 +22,7 @@ class Config:
     REQUEST_TIMEOUT = 15
     REQUEST_DELAY = 2.0
     MAX_RETRIES = 3
-    MAX_NEWS_PER_SOURCE = 50
+    MAX_NEWS_PER_SOURCE = 500
 
     # NLP
     MODEL_MODE = "mock"  # "mock" 或 "local"

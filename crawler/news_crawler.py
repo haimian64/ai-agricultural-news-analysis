@@ -22,7 +22,7 @@ def safe_url(url):
 class AgriculturalNewsCrawler:
     def __init__(self, sources=None, known_ids=None):
         self.sources = sources or NEWS_SOURCES
-        self.known_ids = known_ids or set()  # 已知文章ID集合，用于增量爬取跳过
+        self.known_ids = known_ids or set()
         self.raw_dir = config.RAW_DIR / "news"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -161,8 +161,8 @@ class AgriculturalNewsCrawler:
                 consecutive_empty += 1
                 logger.debug(f"  无匹配文章 (selector={source.article_selector}): {page_url}")
                 continue
-            # 成功获取到文章，重置计数器
-            page_has_new = False  # 当前页是否发现新文章
+            # 处理当前页文章
+            page_has_new = False
             for item in items:
                 if len(articles) >= config.MAX_NEWS_PER_SOURCE:
                     break
@@ -227,7 +227,6 @@ class AgriculturalNewsCrawler:
             # 整页都是已知文章 → 视为空页，触发提前终止分页
             if not page_has_new:
                 consecutive_empty += 1
-                logger.debug(f"  第{urls.index(page_url)}页全部为已知文章 ({len(items)}条)")
             else:
                 consecutive_empty = 0
             # 分页之间延迟

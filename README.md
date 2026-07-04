@@ -1,119 +1,182 @@
-﻿# 农业新闻分析与预警系统
+# 农业新闻分析与预警系统
 
 Agricultural News Analysis & Early Warning System
 
-## 一分钟上手
+基于规则 NLP 的农业新闻智能分析平台，支持多源爬取、自动分类、情感分析、热点提取与可视化仪表盘。无需 GPU、无需外部 API Key、无需 Docker，开箱即用。
 
-### 第一步：确保装了 Python
+## 功能特性
 
-打开命令行 / PowerShell，输入：
-```
-python --version
-```
-如果显示 `Python 3.10+` 就没问题。没装的话先去 https://python.org 下载安装。
+- **多源新闻爬取** — 自动抓取农业农村部、中国农业信息网、天气网等官方渠道的实时新闻与灾害预警
+- **智能分类** — 基于关键词规则将新闻分为政策法规、市场行情、农业科技、灾害预警、国际农业、综合资讯六类
+- **情感分析** — 规则引擎驱动的情感倾向判断（正面/中性/负面）及风险评分
+- **热点提取** — 基于 TF 的二元组关键词提取，支持词云展示
+- **趋势分析** — 按时间维度统计各类别新闻分布与情感变化
+- **可视化仪表盘** — ECharts 驱动的交互式数据大屏，含饼图、柱状图、折线图、词云
+- **天气预报集成** — 接入 Open-Meteo 免费 API，无需注册即可获取城市天气预报
+- **定时调度** — 可配置的周期性自动爬取与分析
 
-### 第二步：安装依赖
+## 技术栈
 
-在 `agricultural-news-analysis` 文件夹里打开命令行，执行：
-```
-pip install aiohttp lxml cssselect
-```
-> 只需装这3个核心包。整个系统不需要 GPU、不需要下载 AI 模型，开箱即用。
+| 层级 | 技术选型 |
+|------|----------|
+| 语言 | Python 3.10+ |
+| Web 框架 | aiohttp（异步 HTTP 服务） |
+| 爬虫 | urllib + lxml + cssselect |
+| 数据库 | SQLite3 |
+| 前端 | 原生 HTML/CSS/JS + ECharts 5 |
+| NLP | 纯规则引擎（可选 transformers 扩展） |
+| 天气 | Open-Meteo（免费，无需 API Key） |
 
-### 第三步：启动
+## 快速开始
 
-**方法 A — 双击（推荐）**
-```
-双击 "启动系统.bat"
-```
+### 环境要求
 
-**方法 B — 命令行**
-```
+- Python 3.10 或更高版本
+- pip 包管理器
+
+### 安装与运行
+
+```bash
+# 1. 克隆项目
+git clone <repo-url>
+cd agricultural-news-analysis
+
+# 2. 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 3. 安装依赖
+pip install aiohttp lxml cssselect jieba
+
+# 4. 启动服务
 python main.py
 ```
 
-### 第四步：打开浏览器
+浏览器访问 `http://localhost:8000/dashboard` 即可打开仪表盘。
 
-访问：http://localhost:8000/dashboard
+### Windows 用户
 
-你会看到仪表盘，包含新闻分类、趋势、情感分析、热点词云和预警列表。
+需先手动安装依赖，之后可使用 bat 脚本启动：
 
----
+```bash
+# 首次使用：安装依赖（只需执行一次）
+pip install aiohttp lxml cssselect jieba
 
-## 项目结构速览
+# 之后每次启动双击即可
+双击 启动系统.bat
+```
+
+> `启动系统.bat` 仅执行 `python main.py`，不包含依赖安装逻辑。首次使用前请务必手动执行 `pip install`。
+
+## 项目结构
 
 ```
 agricultural-news-analysis/
+├── main.py                     # 主入口
+├── config.py                   # 全局配置中心
+├── requirements.txt            # Python 依赖
+├── start.py                    # 备用入口（含自动爬取流程）
 │
-├── main.py              ◀── 入口文件（运行它就行）
-├── config.py                全局配置（端口、抓取间隔等）
-├── 启动系统.bat             双击启动脚本（Windows）
+├── crawler/                    # 爬虫模块
+│   ├── sources.py              # 新闻源与灾害源定义
+│   ├── news_crawler.py         # 新闻爬取器
+│   └── disaster_crawler.py     # 灾害预警爬取器
 │
-├── crawler/                 爬虫模块（自动抓取新闻和预警）
-├── nlp/                     分析模块（分类、摘要、情感、热点）
-├── backend/                 后端服务（数据库、API、定时任务）
-├── frontend/                前端页面（仪表盘HTML/CSS/JS）
-├── data/                    数据存储目录（数据库+缓存）
-└── tests/                   测试用例
+├── nlp/                        # NLP 分析模块
+│   ├── preprocessor.py         # 中文文本预处理与分词
+│   ├── classifier.py           # 新闻分类器
+│   ├── sentiment.py            # 情感分析与风险评分
+│   ├── summarizer.py           # 摘要提取
+│   └── analyzer.py             # 热点话题分析
+│
+├── backend/                    # 后端服务
+│   ├── database.py             # SQLite 数据库管理
+│   ├── api.py                  # aiohttp 路由与接口
+│   └── scheduler.py            # 定时调度器
+│
+├── frontend/                   # 前端
+│   ├── templates/dashboard.html  # 仪表盘页面
+│   └── static/
+│       ├── css/dashboard.css     # 样式
+│       └── js/dashboard.js       # ECharts 图表逻辑
+│
+├── data/                       # 运行时数据（自动生成）
+│   └── agricultural_news.db    # SQLite 数据库
+│
+└── tests/                      # 测试脚本
+    ├── test_crawler.py
+    ├── test_database.py
+    └── test_nlp.py
 ```
-
----
-
-## 拷贝到其他电脑
-
-想把整个系统搬到另一台电脑？只需4步：
-
-**1. 复制文件夹** — 把整个 `agricultural-news-analysis` 文件夹拷贝到U盘或网络传过去
-
-**2. 确保目标电脑有 Python** — 必须是 Python 3.10 或更高版本（推荐 3.11，兼容性最好）
-
-**3. 安装依赖** — 在目标电脑的项目目录下打开命令行：
-```bash
-pip install aiohttp lxml cssselect
-```
-
-**4. 启动** — 双击 `启动系统.bat` 或运行 `python main.py`
-
-> 就这么简单。不需要配置环境变量，不需要改任何代码。
-
-> **注意**：如果是 Windows 电脑，双击 `.bat` 文件就行。Mac/Linux 用户用 `python main.py`。
-
----
-
-## 常见问题
-
-| 问题 | 原因 | 解决方法 |
-|------|------|---------|
-| `pip 找不到命令` | Python 没装好 | 重新安装 Python，勾选"Add to PATH" |
-| `端口 8000 被占用` | 已有一个服务在跑 | 关闭旧的服务，或改 config.py 里的 PORT = 8080 |
-| `浏览器打开空白` | 没连上服务器 | 确认命令行窗口没有关闭，且显示 "服务启动" |
-| `图表不显示` | ECharts 需要联网加载 | 仪表盘需要访问 CDN 加载图表库 |
-| `爬虫抓不到新闻` | 网站结构变化 | 这是正常的。不影响分析功能（可以用测试数据） |
-
----
 
 ## 配置说明
 
-编辑 `config.py` 可调整：
+编辑 `config.py` 即可调整系统行为：
 
-```python
-HOST = "0.0.0.0"         # 监听地址（0.0.0.0 表示局域网也可访问）
-PORT = 8000               # 端口号
-MODEL_MODE = "mock"       # "mock"=规则模式（无需模型）| "local"=本地模型（需transformers）
-SCHEDULER_ENABLED = True  # 是否开启自动抓取
-CRAWL_INTERVAL_MINUTES = 60   # 抓取间隔（分钟）
-REQUEST_DELAY = 2.0       # 爬虫请求间隔（秒）
-```
-
----
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `HOST` | `0.0.0.0` | 服务监听地址 |
+| `PORT` | `8000` | 服务端口（被占用时自动递增） |
+| `MODEL_MODE` | `"mock"` | NLP 模式：`"mock"` 规则引擎 / `"local"` 本地模型 |
+| `SCHEDULER_ENABLED` | `True` | 是否启用定时爬取 |
+| `CRAWL_INTERVAL_MINUTES` | `60` | 定时爬取间隔（分钟） |
+| `ANALYSIS_INTERVAL_MINUTES` | `30` | 定时分析间隔（分钟） |
+| `REQUEST_DELAY` | `2.0` | 爬虫请求间隔（秒） |
+| `MAX_NEWS_PER_SOURCE` | `50` | 每个新闻源最大抓取条数 |
+| `HOT_TOPIC_WINDOW_DAYS` | `7` | 热点分析时间窗口（天） |
 
 ## API 接口
 
-| 地址 | 说明 |
-|------|------|
-| `http://localhost:8000/dashboard` | 可视化仪表盘 |
-| `http://localhost:8000/api/statistics` | 数据统计 |
-| `http://localhost:8000/api/news` | 新闻列表 |
-| `http://localhost:8000/api/disasters` | 灾害预警 |
-| `http://localhost:8000/api/analysis` | 完整分析报告 |
-| `http://localhost:8000/api/health` | 健康检查 |
+所有接口均返回 JSON。
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/health` | GET | 健康检查 |
+| `/api/statistics` | GET | 数据统计（总数、分类分布） |
+| `/api/news` | GET | 新闻列表，支持 `limit` `offset` `category` `start_date` `end_date` `keyword` |
+| `/api/news/categories` | GET | 分类标签列表 |
+| `/api/disasters` | GET | 活跃灾害预警 |
+| `/api/analysis` | GET | 最新完整分析报告 |
+| `/api/analysis/hot-keywords` | GET | 热点关键词及权重 |
+| `/api/analysis/trend` | GET | 分类趋势数据 |
+| `/api/analysis/sentiment-summary` | GET | 情感摘要及综合评分 |
+| `/api/market` | GET | 市场行情数据 |
+| `/api/weather` | GET | 天气预报，参数 `city`（默认 `Beijing`） |
+| `/api/crawl` | GET | 手动触发完整爬取 + NLP 流水线 |
+| `/dashboard` | GET | 仪表盘页面 |
+
+## 数据库
+
+使用 SQLite 文件存储，位于 `data/agricultural_news.db`，包含以下表：
+
+- `news_articles` — 新闻文章（标题、来源、分类、情感、风险评分等）
+- `disaster_warnings` — 灾害预警（区域、等级、灾害类型等）
+- `analysis_results` — 分析结果缓存
+- `market_data` — 市场行情数据
+
+## 运行测试
+
+```bash
+python tests/test_crawler.py
+python tests/test_nlp.py
+```
+
+> 注意：`tests/test_database.py` 使用的 API 与当前 `DatabaseManager` 实现不一致，暂时无法通过。
+
+## NLP 模式
+
+### Mock 模式（默认）
+
+`MODEL_MODE = "mock"` 使用纯规则引擎，无需安装额外依赖：
+- 分类基于关键词词典匹配
+- 分词基于 jieba 中文分词
+- 情感分析基于正负面词表
+- 摘要基于 TF 关键词评分
+
+### Local 模式（可选）
+
+`MODEL_MODE = "local"` 启用深度学习模型，需额外安装：
+
+```bash
+pip install transformers torch
+```
