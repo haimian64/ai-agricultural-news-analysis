@@ -75,7 +75,7 @@ agricultural-news-analysis/
 ├── main.py                     # 主入口
 ├── config.py                   # 全局配置中心
 ├── requirements.txt            # Python 依赖
-├── start.py                    # 备用入口（含自动爬取流程）
+├── 启动系统.bat                 # Windows 启动脚本
 │
 ├── crawler/                    # 爬虫模块
 │   ├── sources.py              # 新闻源与灾害源定义
@@ -122,7 +122,7 @@ agricultural-news-analysis/
 | `CRAWL_INTERVAL_MINUTES` | `60` | 定时爬取间隔（分钟） |
 | `ANALYSIS_INTERVAL_MINUTES` | `30` | 定时分析间隔（分钟） |
 | `REQUEST_DELAY` | `2.0` | 爬虫请求间隔（秒） |
-| `MAX_NEWS_PER_SOURCE` | `50` | 每个新闻源最大抓取条数 |
+| `MAX_NEWS_PER_SOURCE` | `500` | 每个新闻源最大抓取条数 |
 | `HOT_TOPIC_WINDOW_DAYS` | `7` | 热点分析时间窗口（天） |
 
 ## API 接口
@@ -135,14 +135,14 @@ agricultural-news-analysis/
 | `/api/statistics` | GET | 数据统计（总数、分类分布） |
 | `/api/news` | GET | 新闻列表，支持 `limit` `offset` `category` `start_date` `end_date` `keyword` |
 | `/api/news/categories` | GET | 分类标签列表 |
-| `/api/disasters` | GET | 活跃灾害预警 |
+| `/api/disasters` | GET | 活跃灾害预警（无预警时回退到灾害类新闻） |
 | `/api/analysis` | GET | 最新完整分析报告 |
 | `/api/analysis/hot-keywords` | GET | 热点关键词及权重 |
 | `/api/analysis/trend` | GET | 分类趋势数据 |
-| `/api/analysis/sentiment-summary` | GET | 情感摘要及综合评分 |
-| `/api/market` | GET | 市场行情数据 |
-| `/api/weather` | GET | 天气预报，参数 `city`（默认 `Beijing`） |
-| `/api/crawl` | GET | 手动触发完整爬取 + NLP 流水线 |
+| `/api/analysis/sentiment-summary` | GET | 情感摘要及综合评分（支持 `start_date` `end_date`） |
+| `/api/market` | GET | 市场行情数据（实时抓取 agri.cn，非数据库查询） |
+| `/api/weather` | GET | 天气预报，参数 `city`（默认 `郑州`，支持 11 个城市） |
+| `/api/crawl` | GET | 手动触发增量爬取 + NLP 流水线（INSERT OR IGNORE，不丢数据） |
 | `/dashboard` | GET | 仪表盘页面 |
 
 ## 数据库
@@ -162,6 +162,12 @@ python tests/test_nlp.py
 ```
 
 > 注意：`tests/test_database.py` 使用的 API 与当前 `DatabaseManager` 实现不一致，暂时无法通过。
+
+## 重要说明
+
+- **增量爬取**：每次点击"爬取实时新闻"或调用 `/api/crawl` 均为增量模式（`INSERT OR IGNORE`），不会删除已有数据。爬虫会根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。
+- **首次启动**：如果数据库中有新闻但缺少分析结果，`main.py` 会自动补齐分析数据，无需手动操作。
+- **定时调度**：`NewsScheduler` 类已实现但 `main.py` 默认不启动，爬取需通过仪表盘按钮手动触发。如需定时自动爬取，可在代码中自行启用。
 
 ## NLP 模式
 
