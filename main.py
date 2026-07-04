@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     from backend.database import DatabaseManager
-    from backend.api import create_app, set_db_manager
-    from nlp import NewsClassifier, SentimentAnalyzer, HotTopicAnalyzer
+    from backend.api import create_app, set_db_manager, run_analysis_on_existing
 
     config.ensure_dirs()
     logger.info("=== Agri News Analysis System ===")
@@ -22,7 +21,15 @@ def main():
 
     # 清理旧数据库文件中残留的演示数据（source='demo'）
     db.clear_demo_data()
-    logger.info("系统已就绪，点击「爬取实时新闻」按钮获取真实农业新闻数据。")
+
+    # 如果有新闻但缺少分析结果，自动补齐分析（仅计算，不爬取）
+    stats = db.get_statistics()
+    analysis = db.get_recent_analysis("trend")
+    if stats["total_news"] > 0 and (not analysis or not analysis[0].get("trend")):
+        logger.info("检测到新闻数据但缺少分析结果，正在自动生成...")
+        run_analysis_on_existing(db)
+
+    logger.info("系统已就绪，点击「爬取实时新闻」按钮获取最新农业新闻数据。")
 
     # Start server
     import socket

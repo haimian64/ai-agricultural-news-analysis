@@ -77,14 +77,29 @@ body {
 .disaster-section { padding: 0 24px 24px; }
 .disaster-section h2 { font-size: 16px; margin-bottom: 10px; color: #e74c3c; display: flex; align-items: center; gap: 6px; }
 .disaster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
-.disaster-item { background: #fff; padding: 12px 14px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-left: 4px solid; display: flex; justify-content: space-between; align-items: flex-start; }
+.disaster-item {
+    background: #fff; padding: 14px 16px; border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-left: 4px solid;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    transition: all 0.2s; cursor: default;
+}
+.disaster-item:hover { box-shadow: 0 3px 12px rgba(0,0,0,0.12); transform: translateX(3px); }
 .disaster-item.level-1 { border-color: #e74c3c; background: #fdf2f2; }
 .disaster-item.level-2 { border-color: #e67e22; background: #fef5e7; }
 .disaster-item.level-3 { border-color: #f1c40f; background: #fef9e7; }
-.disaster-item .info { flex: 1; }
-.disaster-item .title { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
-.disaster-item .meta { font-size: 11px; color: #888; }
-.disaster-item .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.disaster-item .info { flex: 1; min-width: 0; }
+.disaster-item .title { font-size: 14px; font-weight: 500; margin-bottom: 4px; line-height: 1.4; }
+.disaster-item .title a.disaster-title-link {
+    color: #2c3e50; text-decoration: none; transition: color 0.2s;
+}
+.disaster-item .title a.disaster-title-link:hover { color: #e74c3c; text-decoration: underline; }
+.disaster-item .title a.disaster-title-link::after {
+    content: " 🔗"; font-size: 10px; opacity: 0.4;
+}
+.disaster-item .meta { font-size: 11px; color: #888; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.disaster-desc { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.5; }
+.disaster-type-tag { background: #eee; padding: 1px 8px; border-radius: 10px; font-size: 10px; color: #666; }
+.disaster-item .badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
 .badge-red { background: #e74c3c; color: #fff; }
 .badge-orange { background: #e67e22; color: #fff; }
 .badge-yellow { background: #f1c40f; color: #333; }

@@ -174,7 +174,19 @@
         var ll={1:"红色",2:"橙色",3:"黄色",4:"蓝色"};
         container.innerHTML = d.length ? d.map(function(x){
             var sev=x.severity||99; var lvl=sev<=4?sev:99;
-            return "<div class='disaster-item "+(lc[lvl]||"")+"'><div class='info'><div class='title'>"+(x.title||"未知")+"</div><div class='meta'>"+(x.source||"")+" | "+(x.date||"")+" | "+(x.region||"")+"</div></div><span class='badge "+(bc[lvl]||"badge-blue")+"'>"+(ll[lvl]||x.alert_level||"未知")+"</span></div>";
+            var url=x.url||"";
+            var title=x.title||"未知";
+            var titleHtml = url ? "<a href='"+url+"' target='_blank' class='disaster-title-link' title='点击查看详情'>"+title+"</a>" : title;
+            var desc = x.description ? "<div class='disaster-desc'>"+(x.description||"").slice(0,120)+"</div>" : "";
+            var dtype = x.disaster_type ? "<span class='disaster-type-tag'>"+x.disaster_type+"</span>" : "";
+            return "<div class='disaster-item "+(lc[lvl]||"")+"'>" +
+                "<div class='info'>" +
+                    "<div class='title'>"+titleHtml+"</div>" +
+                    "<div class='meta'>"+(x.source||"")+" | "+(x.date||"").slice(0,10)+" | "+(x.region||"")+dtype+"</div>" +
+                    desc +
+                "</div>" +
+                "<span class='badge "+(bc[lvl]||"badge-blue")+"'>"+(ll[lvl]||x.alert_level||"未知")+"</span>" +
+            "</div>";
         }).join("") : "<div style='padding:30px;text-align:center;color:#888'>暂无灾害预警数据</div>";
     }
 
@@ -315,46 +327,6 @@
         }
     };
 
-    // Crawl: fetch real news
-    window.startCrawl = async function() {
-        var btn = byId("btnCrawl");
-        if(!btn) return;
-        btn.disabled = true;
-        btn.textContent = "⏳ 爬取中...";
-        btn.style.opacity = "0.6";
-        try {
-            var result = await fetchJSON(API+"/crawl");
-            if(result) {
-                setText("statusText", "已爬取 "+(result.crawled||0)+" 条, 共 "+(result.total||0)+" 条");
-                // Refresh all data
-                await Promise.all([
-                    loadStatistics(), loadCategoryChart(), loadSentimentChart(),
-                    loadTrendChart(), loadKeywords(), loadDisasters(),
-                    loadNewsList(), loadMarket()
-                ]);
-                btn.textContent = "✅ 爬取完成 ("+(result.crawled||0)+"条)";
-                setTimeout(function(){
-                    btn.textContent = "🔄 爬取实时新闻";
-                    btn.disabled = false;
-                    btn.style.opacity = "1";
-                    setText("statusText", "系统运行中");
-                }, 3000);
-            } else {
-                btn.textContent = "❌ 爬取失败";
-                setTimeout(function(){
-                    btn.textContent = "🔄 爬取实时新闻";
-                    btn.disabled = false;
-                    btn.style.opacity = "1";
-                }, 2000);
-            }
-        } catch(e) {
-            btn.textContent = "❌ 出错";
-            btn.disabled = false;
-            btn.style.opacity = "1";
-            setTimeout(function(){btn.textContent="🔄 爬取实时新闻";}, 2000);
-        }
-    };
-
     // Init
     async function init() {
         var d=getDefaultDates();
@@ -364,6 +336,7 @@
         byId("btnKeywords").onclick=async function(){currentKeyword=null;await keywordFilter(null);};
         byId("btnCloseKeywordNews").onclick=async function(){currentKeyword=null;byId("keywordNewsRow").style.display="none";await keywordFilter(null);};
         byId("btnMarket").onclick=loadMarket;
+        byId("btnRefreshDisasters").onclick=loadDisasters;
         await Promise.all([
             loadStatistics(),loadCategoryChart(),loadSentimentChart(),
             loadTrendChart(),loadKeywords(),loadDisasters(),loadNewsList(),loadMarket()

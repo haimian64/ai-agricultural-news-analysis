@@ -75,8 +75,11 @@
 <div id="marketList" class="market-list"></div>
 </div></div>
 <div class="tab-content" id="tabDisaster" style="display:none">
-<h2 style="color:red;padding:12px 24px">实时灾害预警</h2>
-<div class="disaster-grid" id="disasterList" style="padding:0 24px 24px"></div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px 0">
+<h2 style="color:red;margin:0">实时灾害预警</h2>
+<button id="btnRefreshDisasters" class="btn-sm btn-primary">刷新</button>
+</div>
+<div class="disaster-grid" id="disasterList" style="padding:12px 24px 24px"></div>
 </div>
 <script src="/static/js/dashboard.js"></script>
 </body>
