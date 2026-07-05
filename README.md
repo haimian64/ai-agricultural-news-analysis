@@ -40,7 +40,7 @@ Agricultural News Analysis & Early Warning System
 
 ```bash
 # 克隆项目
-git clone <repo-url>
+git clone https://github.com/haimian64/ai-agricultural-news-analysis.git
 cd agricultural-news-analysis
 
 # 创建虚拟环境
