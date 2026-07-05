@@ -36,7 +36,7 @@ Agricultural News Analysis & Early Warning System
 
 ### 安装与运行
 
-**第一步：安装依赖（所有平台通用）**
+**第一步：安装依赖**
 
 ```bash
 # 克隆项目
