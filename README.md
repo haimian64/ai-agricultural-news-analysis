@@ -36,37 +36,39 @@ Agricultural News Analysis & Early Warning System
 
 ### 安装与运行
 
+**第一步：安装依赖（所有平台通用）**
+
 ```bash
-# 1. 克隆项目
+# 克隆项目
 git clone <repo-url>
 cd agricultural-news-analysis
 
-# 2. 创建虚拟环境
+# 创建虚拟环境
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 3. 安装依赖
+# 安装依赖
 pip install aiohttp lxml cssselect jieba
+```
 
-# 4. 启动服务
+**第二步：启动服务**
+
+**Linux / macOS：**
+
+```bash
+source venv/bin/activate
 python main.py
 ```
 
-浏览器访问 `http://localhost:8000/dashboard` 即可打开仪表盘。
-
-### Windows 用户
-
-需先手动安装依赖，之后可使用 bat 脚本启动：
+**Windows：**
 
 ```bash
-# 首次使用：安装依赖（只需执行一次）
-pip install aiohttp lxml cssselect jieba
-
-# 之后每次启动双击即可
-双击 启动系统.bat
+venv\Scripts\activate
+python main.py
 ```
 
-> `启动系统.bat` 仅执行 `python main.py`，不包含依赖安装逻辑。首次使用前请务必手动执行 `pip install`。
+> Windows 用户也可以直接双击 `start.bat`，它会自动调用 `python main.py` 启动服务。
+
+浏览器访问 `http://localhost:8000/dashboard` 即可打开仪表盘。
 
 ## 项目结构
 
@@ -75,7 +77,7 @@ agricultural-news-analysis/
 ├── main.py                     # 主入口
 ├── config.py                   # 全局配置中心
 ├── requirements.txt            # Python 依赖
-├── 启动系统.bat                 # Windows 启动脚本
+├── start.bat                 # Windows 启动脚本
 │
 ├── crawler/                    # 爬虫模块
 │   ├── sources.py              # 新闻源与灾害源定义
