@@ -25,7 +25,7 @@ class Config:
     MAX_NEWS_PER_SOURCE = 500
 
     # NLP
-    MODEL_MODE = "mock"  # "mock" 或 "local"
+    MODEL_MODE = "local"  # "mock"=规则引擎 或 "local"=GPU深度学习模型
     NUM_CLASSES = 6
     CATEGORY_LABELS = ["政策法规", "市场行情", "农业科技", "灾害预警", "国际农业", "综合资讯"]
     MAX_INPUT_LENGTH = 512
@@ -44,6 +44,9 @@ class Config:
     RAW_DIR = DATA_DIR / "raw"
     PROCESSED_DIR = DATA_DIR / "processed"
     DB_DIR = DATA_DIR
+    MODEL_DIR = BASE_DIR / "models"                      # 深度学习模型目录
+    SENTIMENT_MODEL = "bert-base-chinese-sentiment"      # 中文情感三分类（GPU）
+    ZERO_SHOT_MODEL = "mDeBERTa-v3-base-xnli"            # 多语言零样本分类（GPU）
 
     @classmethod
     def ensure_dirs(cls):

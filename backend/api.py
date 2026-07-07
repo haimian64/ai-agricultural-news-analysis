@@ -509,30 +509,69 @@ async def handle_weather(request):
     except Exception as e:
         return json_resp({"error": str(e), "city": city}, 200)
 
+def _get_nlp_modules():
+    """根据 config.MODEL_MODE 返回 (classifier, sentiment, hot_topic) 实例。
+
+    "mock"  → 规则引擎（NewsClassifier + SentimentAnalyzer）
+    "local" → GPU 深度学习模型（ModelNewsClassifier + ModelSentimentAnalyzer）
+    """
+    from nlp import NewsClassifier, SentimentAnalyzer, HotTopicAnalyzer
+
+    if config.MODEL_MODE == "local":
+        try:
+            from nlp import ModelNewsClassifier, ModelSentimentAnalyzer
+            logger.info("[NLP] 使用 GPU 深度学习模型")
+            return ModelNewsClassifier(), ModelSentimentAnalyzer(), HotTopicAnalyzer()
+        except Exception as e:
+            logger.warning(f"[NLP] 模型加载失败，回退规则引擎: {e}")
+
+    logger.info("[NLP] 使用规则引擎")
+    return NewsClassifier(), SentimentAnalyzer(), HotTopicAnalyzer()
+
+
+def _classify_and_sentiment_batch(articles, classifier, sentiment):
+    """对一批文章运行分类和情感分析（原地修改）。
+
+    分类：逐条处理（零样本 pipeline 不支持批量）
+    情感：优先使用 batch 推理（GPU 满载利用）
+    """
+    if not articles:
+        return
+    n = len(articles)
+    logger.info(f"[NLP] 对 {n} 条新闻运行分类+情感分析...")
+
+    # 分类 — 逐条（零样本 pipeline 暂不支持 batch）
+    for i, a in enumerate(articles):
+        a["category"] = classifier.classify(a.get("title", ""))["category"]
+        if (i + 1) % max(1, n // 5) == 0:
+            logger.info(f"[NLP] 分类进度: {i + 1}/{n}")
+
+    # 情感 — ModelSentimentAnalyzer 的 analyze_batch 支持 GPU 批量推理
+    if hasattr(sentiment, "analyze_batch"):
+        sentiment.analyze_batch(articles)
+    else:
+        for i, a in enumerate(articles):
+            r = sentiment.analyze(a.get("title", ""))
+            a["sentiment"] = r["label"]
+            a["sentiment_score"] = r["score"]
+            a["risk_score"] = r.get("risk_score", 0.0)
+
+    logger.info(f"[NLP] 分类+情感分析完成: {n} 条")
+
+
 def run_analysis_on_existing(db):
     """对 DB 中已有新闻运行 NLP 分析（不爬取新数据）。
     当 analysis_results 为空但 news_articles 有数据时使用。
     """
-    from nlp import NewsClassifier, SentimentAnalyzer, HotTopicAnalyzer
+    from nlp import HotTopicAnalyzer
 
     arts = db.get_all_news(2000)
     if not arts:
         logger.info("[ANALYSIS] 数据库中没有新闻，跳过分析")
         return
 
-    clf = NewsClassifier()
-    sa = SentimentAnalyzer()
-    ha = HotTopicAnalyzer()
-
-    # 对尚未有分类的打上分类标签
-    for a in arts:
-        if not a.get("category") or a.get("category") == "综合资讯":
-            a["category"] = clf.classify(a.get("title", ""))["category"]
-        if not a.get("sentiment_score") or a.get("sentiment_score") == 0.5:
-            r = sa.analyze(a.get("title", ""))
-            a["sentiment"] = r["label"]
-            a["sentiment_score"] = r["score"]
-            a["risk_score"] = r.get("risk_score", 0.0)
+    clf, sa, ha = _get_nlp_modules()
+    _classify_and_sentiment_batch(arts, clf, sa)
 
     # 趋势 + 热词 + 全量分析
     trend_data = ha.trend_over_time(arts)
@@ -547,7 +586,7 @@ def run_crawl_pipeline(db):
     """执行完整的爬取+NLP+分析流水线（增量追加，不清除旧数据）。
     返回本次爬取到的文章数量。
     """
-    from nlp import NewsClassifier, SentimentAnalyzer, HotTopicAnalyzer
+    from nlp import HotTopicAnalyzer
     from crawler.news_crawler import AgriculturalNewsCrawler
 
     # 查询已有文章ID，传给爬虫实现增量跳过
@@ -562,16 +601,8 @@ def run_crawl_pipeline(db):
         logger.info("[CRAWL] 未爬取到新文章")
         return 0
 
-    clf2 = NewsClassifier()
-    sa2 = SentimentAnalyzer()
-    ha2 = HotTopicAnalyzer()
-
-    for a in all_a:
-        a["category"] = clf2.classify(a.get("title", ""))["category"]
-        r2 = sa2.analyze(a.get("title", ""))
-        a["sentiment"] = r2["label"]
-        a["sentiment_score"] = r2["score"]
-        a["risk_score"] = r2.get("risk_score", 0.0)
+    clf, sa, ha = _get_nlp_modules()
+    _classify_and_sentiment_batch(all_a, clf, sa)
 
     # INSERT OR IGNORE 实现增量追加，相同 ID 的文章自动跳过
     saved = db.save_news(all_a)
@@ -588,9 +619,9 @@ def run_crawl_pipeline(db):
     logger.info(f"[CRAWL] 类别分布: {cats_found}")
 
     # 对 DB 中全部文章重新做趋势分析
-    trend_data = ha2.trend_over_time(arts)
-    db.save_analysis("full_analysis", ha2.full_analysis(arts))
-    db.save_analysis("hot_keywords", {"keywords": ha2.extract_keywords([a.get("title", "") for a in arts], 30)})
+    trend_data = ha.trend_over_time(arts)
+    db.save_analysis("full_analysis", ha.full_analysis(arts))
+    db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords([a.get("title", "") for a in arts], 30)})
     db.save_analysis("trend", {"trend": trend_data})
 
     return len(all_a)

@@ -4,6 +4,7 @@ from .classifier import NewsClassifier
 from .summarizer import NewsSummarizer
 from .sentiment import SentimentAnalyzer
 from .analyzer import HotTopicAnalyzer
+from .model_inference import ModelNewsClassifier, ModelSentimentAnalyzer
 
 __all__ = [
     "TextPreprocessor",
@@ -11,4 +12,6 @@ __all__ = [
     "NewsSummarizer",
     "SentimentAnalyzer",
     "HotTopicAnalyzer",
+    "ModelNewsClassifier",
+    "ModelSentimentAnalyzer",
 ]
