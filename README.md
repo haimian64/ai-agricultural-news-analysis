@@ -2,17 +2,17 @@
 
 Agricultural News Analysis & Early Warning System
 
-基于规则 NLP 的农业新闻智能分析平台，支持多源爬取、自动分类、情感分析、热点提取与可视化仪表盘。无需 GPU、无需外部 API Key、无需 Docker，开箱即用。
+基于规则 NLP + 深度学习（可选）的农业新闻智能分析平台，支持多源爬取、自动分类、情感分析、热点提取与可视化仪表盘。默认无需 GPU、无需外部 API Key、无需 Docker，开箱即用。可一键切换 GPU 深度学习模型以提升 NLP 准确率。
 
 ## 功能特性
 
 - **多源新闻爬取** — 自动抓取农业农村部、中国农业信息网、天气网等官方渠道的实时新闻与灾害预警
-- **智能分类** — 基于关键词规则将新闻分为政策法规、市场行情、农业科技、灾害预警、国际农业、综合资讯六类
-- **情感分析** — 规则引擎驱动的情感倾向判断（正面/中性/负面）及风险评分
+- **智能分类** — 支持规则关键词匹配（默认）与 mDeBERTa 多语言零样本分类（GPU），六类：政策法规、市场行情、农业科技、灾害预警、国际农业、综合资讯
+- **情感分析** — 支持规则引擎（默认）与 BERT 中文深度学习情感三分类（GPU），含风险评分
 - **热点提取** — 基于 TF 的二元组关键词提取，支持词云展示
 - **趋势分析** — 按时间维度统计各类别新闻分布与情感变化
 - **可视化仪表盘** — ECharts 驱动的交互式数据大屏，含饼图、柱状图、折线图、词云
-- **天气预报集成** — 接入 Open-Meteo 免费 API，无需注册即可获取城市天气预报
+- **天气预报集成** — 接入 Open-Meteo 免费 API，无需注册即可获取全国 ~350+ 城市天气预报
 - **定时调度** — 可配置的周期性自动爬取与分析
 
 ## 技术栈
@@ -24,7 +24,8 @@ Agricultural News Analysis & Early Warning System
 | 爬虫 | urllib + lxml + cssselect |
 | 数据库 | SQLite3 |
 | 前端 | 原生 HTML/CSS/JS + ECharts 5 |
-| NLP | 纯规则引擎（可选 transformers 扩展） |
+| NLP | 规则引擎（默认）/ transformers 深度学习模型（可选 GPU） |
+| GPU 模型 | mDeBERTa-v3-base-xnli（零样本分类）+ bert-base-chinese-sentiment（情感分析） |
 | 天气 | Open-Meteo（免费，无需 API Key） |
 
 ## 快速开始
@@ -46,8 +47,11 @@ cd agricultural-news-analysis
 # 创建虚拟环境
 python -m venv venv
 
-# 安装依赖
+# 安装依赖（规则引擎模式，无需 GPU）
 pip install aiohttp lxml cssselect jieba
+
+# 可选：如需启用 GPU 深度学习模型
+pip install transformers torch
 ```
 
 **第二步：启动服务**
@@ -86,10 +90,15 @@ agricultural-news-analysis/
 │
 ├── nlp/                        # NLP 分析模块
 │   ├── preprocessor.py         # 中文文本预处理与分词
-│   ├── classifier.py           # 新闻分类器
-│   ├── sentiment.py            # 情感分析与风险评分
+│   ├── classifier.py           # 规则新闻分类器
+│   ├── sentiment.py            # 规则情感分析与风险评分
 │   ├── summarizer.py           # 摘要提取
-│   └── analyzer.py             # 热点话题分析
+│   ├── analyzer.py             # 热点话题分析
+│   └── model_inference.py      # GPU 深度学习模型推理（懒加载）
+│
+├── models/                     # 预训练模型文件（需手动下载）
+│   ├── bert-base-chinese-sentiment/  # 中文情感三分类
+│   └── mDeBERTa-v3-base-xnli/       # 多语言零样本分类
 │
 ├── backend/                    # 后端服务
 │   ├── database.py             # SQLite 数据库管理
@@ -119,7 +128,10 @@ agricultural-news-analysis/
 |------|--------|------|
 | `HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` | `8000` | 服务端口（被占用时自动递增） |
-| `MODEL_MODE` | `"mock"` | NLP 模式：`"mock"` 规则引擎 / `"local"` 本地模型 |
+| `MODEL_MODE` | `"mock"` | NLP 模式：`"mock"` 规则引擎 / `"local"` GPU 深度学习模型 |
+| `MODEL_DIR` | `BASE_DIR/"models"` | 预训练模型存放目录 |
+| `SENTIMENT_MODEL` | `"bert-base-chinese-sentiment"` | 情感分析模型名称 |
+| `ZERO_SHOT_MODEL` | `"mDeBERTa-v3-base-xnli"` | 零样本分类模型名称 |
 | `SCHEDULER_ENABLED` | `True` | 是否启用定时爬取 |
 | `CRAWL_INTERVAL_MINUTES` | `60` | 定时爬取间隔（分钟） |
 | `ANALYSIS_INTERVAL_MINUTES` | `30` | 定时分析间隔（分钟） |
@@ -143,7 +155,7 @@ agricultural-news-analysis/
 | `/api/analysis/trend` | GET | 分类趋势数据 |
 | `/api/analysis/sentiment-summary` | GET | 情感摘要及综合评分（支持 `start_date` `end_date`） |
 | `/api/market` | GET | 市场行情数据（实时抓取 agri.cn，非数据库查询） |
-| `/api/weather` | GET | 天气预报，参数 `city`（默认 `郑州`，支持 11 个城市） |
+| `/api/weather` | GET | 天气预报，参数 `city`（默认 `郑州`，支持 ~350+ 城市） |
 | `/api/crawl` | GET | 手动触发增量爬取 + NLP 流水线（INSERT OR IGNORE，不丢数据） |
 | `/dashboard` | GET | 仪表盘页面 |
 
@@ -181,10 +193,33 @@ python tests/test_nlp.py
 - 情感分析基于正负面词表
 - 摘要基于 TF 关键词评分
 
-### Local 模式（可选）
+### Local 模式（GPU 深度学习）
 
-`MODEL_MODE = "local"` 启用深度学习模型，需额外安装：
+`MODEL_MODE = "local"` 启用深度学习模型，需额外安装 GPU 依赖并将模型文件放入 `models/` 目录：
 
 ```bash
+# 1. 安装 GPU 依赖
 pip install transformers torch
+
+# 2. 下载模型文件到 models/ 目录
+#    - bert-base-chinese-sentiment  (HuggingFace: jackietung/bert-base-chinese-sentiment-finetuned)
+#    - mDeBERTa-v3-base-xnli       (HuggingFace: MoritzLaurer/mDeBERTa-v3-base-mnli-xnli)
 ```
+
+**两种模型：**
+
+| 模型 | 文件 | 任务 | 说明 |
+|------|------|------|------|
+| `ModelNewsClassifier` | `nlp/model_inference.py` | 新闻六分类 | mDeBERTa-v3 多语言零样本分类，无需标注训练数据，直接传入中文标签即可分类 |
+| `ModelSentimentAnalyzer` | `nlp/model_inference.py` | 情感三分类 + 风险评分 | BERT-base 中文情感模型（正/中/负），风险评分保留规则匹配 |
+
+**使用方式：**
+
+只需将 `config.py` 中的 `MODEL_MODE` 改为 `"local"`，系统启动时自动加载 GPU 模型。模型加载失败时自动回退规则引擎，不影响服务可用性。
+
+**技术细节：**
+
+- 模型采用**懒加载**：首次调用才加载到 GPU 显存，不影响启动速度
+- 情感分析支持 **GPU 批量推理**（batch_size=64），充分利用 RTX 4070 等显卡
+- 风险评分保留**规则匹配**，因为灾害术语（"台风""暴雨""冰雹"）几乎没有歧义，关键词匹配比模型更可靠
+- 接口与规则版**完全兼容**：`ModelNewsClassifier.classify(title)` 和 `ModelSentimentAnalyzer.analyze(text)` 的输入输出与 `NewsClassifier` / `SentimentAnalyzer` 一致，流水线代码无需修改
