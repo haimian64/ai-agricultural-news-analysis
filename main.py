@@ -20,14 +20,35 @@ def main():
     set_db_manager(db)
 
     # 清理旧数据库文件中残留的演示数据（source='demo'）
+    # 注意：不会清除 article_model_results（保留已分析结果）
     db.clear_demo_data()
 
-    # 如果有新闻但缺少分析结果，自动补齐分析（仅计算，不爬取）
+    # 仅对未分析的新闻自动补齐分析（已分析过的跳过，不重复计算）
     stats = db.get_statistics()
-    analysis = db.get_recent_analysis("trend")
-    if stats["total_news"] > 0 and (not analysis or not analysis[0].get("trend")):
-        logger.info("检测到新闻数据但缺少分析结果，正在自动生成...")
+    unanalyzed = db.count_unanalyzed_articles()
+    if stats["total_news"] > 0 and unanalyzed > 0:
+        logger.info(f"检测到 {unanalyzed} 条未分析的新闻，正在自动补齐...")
         run_analysis_on_existing(db)
+    elif stats["total_news"] > 0:
+        logger.info(f"全部 {stats['total_news']} 条新闻均已分析，跳过。")
+    else:
+        logger.info("数据库中没有新闻，请点击「爬取实时新闻」获取数据。")
+
+    # 始终从已有数据重新生成聚合分析（趋势/热词/综合报告）
+    # 因为 clear_demo_data() 会清空 analysis_results
+    if stats["total_news"] > 0:
+        from nlp import HotTopicAnalyzer
+        from backend.api import get_db
+        _db = get_db()
+        all_arts = _db.get_all_news(500)
+        if all_arts:
+            ha = HotTopicAnalyzer()
+            trend_data = ha.trend_over_time(all_arts)
+            _db.save_analysis("full_analysis", ha.full_analysis(all_arts))
+            _db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords(
+                [a.get("title", "") for a in all_arts if a.get("title")], 30)})
+            _db.save_analysis("trend", {"trend": trend_data})
+            logger.info("聚合分析已从已有数据重新生成。")
 
     logger.info("系统已就绪，点击「爬取实时新闻」按钮获取最新农业新闻数据。")
 

@@ -1,8 +1,9 @@
 """
-数据库模块 - 添加搜索、日期筛选、市场数据
+数据库模块 - 添加搜索、日期筛选、市场数据、模型推理结果存储
 """
 import json, sqlite3, logging, re
 from datetime import datetime
+from pathlib import Path
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,26 @@ class DatabaseManager:
                 title TEXT, url TEXT, category TEXT,
                 date TEXT, content TEXT, crawled_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS article_model_results (
+                article_id TEXT PRIMARY KEY,
+                model_mode TEXT NOT NULL,
+                classifier_name TEXT,
+                classifier_scores TEXT,
+                classifier_category TEXT,
+                sentiment_name TEXT,
+                sentiment_scores TEXT,
+                sentiment_label TEXT,
+                sentiment_score REAL,
+                risk_score REAL,
+                model_params TEXT,
+                analyzed_at TEXT NOT NULL
+            );
         """)
         self.conn.commit()
 
+    # ============================================================
+    # 新闻 & 灾害 & 市场 — 不变
+    # ============================================================
     def save_news(self, articles):
         c = self.conn.cursor()
         count = 0
@@ -60,7 +78,8 @@ class DatabaseManager:
                     (a["id"], a.get("title",""), a.get("url",""), a.get("source",""),
                      a.get("date",""), a.get("content",""), a.get("summary",""),
                      a.get("category","综合资讯"), a.get("sentiment","neutral"),
-                     a.get("sentiment_score",0.5), a.get("risk_score",0.0), ""))
+                     a.get("sentiment_score",0.5), a.get("risk_score",0.0),
+                     a.get("crawled_at","")))
                 if c.rowcount > 0: count += 1
             except Exception as e:
                 logger.error(f"保存新闻失败: {e}")
@@ -95,12 +114,171 @@ class DatabaseManager:
         self.conn.commit()
         return count
 
-    def save_analysis(self, analysis_type, result):
+    # ============================================================
+    # 模型推理结果 — 每条新闻独立存储
+    # ============================================================
+    def save_article_model_result(self, article_id: str, result: dict):
+        """保存单条新闻的模型推理结果"""
         c = self.conn.cursor()
-        c.execute("INSERT INTO analysis_results (analysis_type, result_json, created_at) VALUES (?,?,?)",
-            (analysis_type, json.dumps(result, ensure_ascii=False), datetime.now().isoformat()))
+        c.execute("""
+            INSERT OR REPLACE INTO article_model_results
+            (article_id, model_mode, classifier_name, classifier_scores,
+             classifier_category, sentiment_name, sentiment_scores,
+             sentiment_label, sentiment_score, risk_score, model_params, analyzed_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            article_id,
+            result.get("model_mode", ""),
+            result.get("classifier_name", ""),
+            json.dumps(result.get("classifier_scores", {}), ensure_ascii=False),
+            result.get("classifier_category", ""),
+            result.get("sentiment_name", ""),
+            json.dumps(result.get("sentiment_scores", {}), ensure_ascii=False),
+            result.get("sentiment_label", ""),
+            result.get("sentiment_score", 0.0),
+            result.get("risk_score", 0.0),
+            json.dumps(result.get("model_params", {}), ensure_ascii=False),
+            result.get("analyzed_at", datetime.now().isoformat()),
+        ))
         self.conn.commit()
 
+    def save_article_model_results_batch(self, results: list[dict]):
+        """批量保存模型推理结果"""
+        c = self.conn.cursor()
+        rows = []
+        for r in results:
+            rows.append((
+                r["article_id"],
+                r.get("model_mode", ""),
+                r.get("classifier_name", ""),
+                json.dumps(r.get("classifier_scores", {}), ensure_ascii=False),
+                r.get("classifier_category", ""),
+                r.get("sentiment_name", ""),
+                json.dumps(r.get("sentiment_scores", {}), ensure_ascii=False),
+                r.get("sentiment_label", ""),
+                r.get("sentiment_score", 0.0),
+                r.get("risk_score", 0.0),
+                json.dumps(r.get("model_params", {}), ensure_ascii=False),
+                r.get("analyzed_at", datetime.now().isoformat()),
+            ))
+        c.executemany("""
+            INSERT OR REPLACE INTO article_model_results
+            (article_id, model_mode, classifier_name, classifier_scores,
+             classifier_category, sentiment_name, sentiment_scores,
+             sentiment_label, sentiment_score, risk_score, model_params, analyzed_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, rows)
+        self.conn.commit()
+        logger.info(f"[DB] 批量保存 {len(rows)} 条模型结果")
+
+    def get_article_model_result(self, article_id: str) -> dict | None:
+        """获取单条新闻的模型推理结果（已解析 JSON）"""
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM article_model_results WHERE article_id=?", (article_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        for field in ("classifier_scores", "sentiment_scores", "model_params"):
+            try:
+                d[field] = json.loads(d.get(field, "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d[field] = {}
+        return d
+
+    def get_analyzed_article_ids(self) -> set[str]:
+        """获取已分析的新闻 ID 集合"""
+        c = self.conn.cursor()
+        c.execute("SELECT article_id FROM article_model_results")
+        return {r[0] for r in c.fetchall()}
+
+    def get_unanalyzed_article_ids(self, limit: int = 5000) -> list[str]:
+        """获取尚未分析的新闻 ID 列表"""
+        c = self.conn.cursor()
+        c.execute("""
+            SELECT n.id FROM news_articles n
+            LEFT JOIN article_model_results m ON n.id = m.article_id
+            WHERE m.article_id IS NULL
+            ORDER BY n.date DESC
+            LIMIT ?
+        """, (limit,))
+        return [r[0] for r in c.fetchall()]
+
+    def count_unanalyzed_articles(self) -> int:
+        """统计未分析的新闻数量"""
+        c = self.conn.cursor()
+        c.execute("""
+            SELECT COUNT(*) FROM news_articles n
+            LEFT JOIN article_model_results m ON n.id = m.article_id
+            WHERE m.article_id IS NULL
+        """)
+        return c.fetchone()[0]
+
+    def get_all_model_results(self) -> list[dict]:
+        """获取所有模型推理结果（含解析后的 JSON）"""
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM article_model_results ORDER BY analyzed_at DESC")
+        results = []
+        for row in c.fetchall():
+            d = dict(row)
+            for field in ("classifier_scores", "sentiment_scores", "model_params"):
+                try:
+                    d[field] = json.loads(d.get(field, "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d[field] = {}
+            results.append(d)
+        return results
+
+    def export_model_results_json(self, filepath: str = None) -> str:
+        """导出所有模型推理结果为 JSON 文件，返回文件路径"""
+        if filepath is None:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            export_dir = config.DATA_DIR / "analysis"
+            export_dir.mkdir(parents=True, exist_ok=True)
+            filepath = str(export_dir / f"model_results_{ts}.json")
+
+        results = self.get_all_model_results()
+        export = {
+            "exported_at": datetime.now().isoformat(),
+            "model_mode": config.MODEL_MODE,
+            "total": len(results),
+            "results": results,
+        }
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(export, f, ensure_ascii=False, indent=2)
+        logger.info(f"[DB] 导出 {len(results)} 条模型结果 → {filepath}")
+        return filepath
+
+    def get_articles_with_model_results(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """获取新闻 + 模型结果（JOIN 查询，便于前端展示）"""
+        c = self.conn.cursor()
+        c.execute("""
+            SELECT n.*, m.model_mode, m.classifier_name, m.classifier_scores,
+                   m.classifier_category as model_category,
+                   m.sentiment_name, m.sentiment_scores,
+                   m.sentiment_label as model_sentiment_label,
+                   m.sentiment_score as model_sentiment_score,
+                   m.risk_score as model_risk_score,
+                   m.model_params, m.analyzed_at
+            FROM news_articles n
+            LEFT JOIN article_model_results m ON n.id = m.article_id
+            ORDER BY n.date DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        articles = []
+        for row in c.fetchall():
+            d = dict(row)
+            for field in ("classifier_scores", "sentiment_scores", "model_params"):
+                try:
+                    d[field] = json.loads(d.get(field, "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d[field] = {}
+            articles.append(d)
+        return articles
+
+    # ============================================================
+    # 查询 & 统计 — 不变
+    # ============================================================
     def get_all_news(self, limit=100, offset=0, category=None):
         c = self.conn.cursor()
         if category:
@@ -110,21 +288,18 @@ class DatabaseManager:
         return [dict(r) for r in c.fetchall()]
 
     def search_news(self, keyword, limit=50):
-        """按关键词搜索新闻标题"""
         c = self.conn.cursor()
         like = f"%{keyword}%"
         c.execute("SELECT * FROM news_articles WHERE title LIKE ? ORDER BY date DESC LIMIT ?", (like, limit))
         return [dict(r) for r in c.fetchall()]
 
     def get_news_by_date_range(self, start_date, end_date, limit=200):
-        """按日期范围筛选"""
         c = self.conn.cursor()
         c.execute("SELECT * FROM news_articles WHERE date >= ? AND date <= ? ORDER BY date DESC LIMIT ?",
             (start_date, end_date, limit))
         return [dict(r) for r in c.fetchall()]
 
     def get_news_by_keyword_and_date(self, keyword, start_date=None, end_date=None, limit=50):
-        """关键词+日期组合筛选"""
         c = self.conn.cursor()
         like = f"%{keyword}%"
         if start_date and end_date:
@@ -135,7 +310,6 @@ class DatabaseManager:
         return [dict(r) for r in c.fetchall()]
 
     def get_sentiment_summary(self, start_date=None, end_date=None):
-        """获取情感摘要统计"""
         c = self.conn.cursor()
         if start_date and end_date:
             c.execute("SELECT COUNT(*), AVG(sentiment_score), SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END), SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) FROM news_articles WHERE date >= ? AND date <= ?", (start_date, end_date))
@@ -160,6 +334,12 @@ class DatabaseManager:
         c.execute("SELECT * FROM disaster_warnings ORDER BY severity ASC LIMIT ?", (limit,))
         return [dict(r) for r in c.fetchall()]
 
+    def save_analysis(self, analysis_type, result):
+        c = self.conn.cursor()
+        c.execute("INSERT INTO analysis_results (analysis_type, result_json, created_at) VALUES (?,?,?)",
+            (analysis_type, json.dumps(result, ensure_ascii=False), datetime.now().isoformat()))
+        self.conn.commit()
+
     def get_recent_analysis(self, analysis_type, limit=1):
         c = self.conn.cursor()
         c.execute("SELECT * FROM analysis_results WHERE analysis_type=? ORDER BY created_at DESC LIMIT ?", (analysis_type, limit))
@@ -176,10 +356,12 @@ class DatabaseManager:
         c.execute("SELECT COUNT(*) FROM disaster_warnings"); td = c.fetchone()[0]
         c.execute("SELECT category, COUNT(*) FROM news_articles GROUP BY category")
         cats = {r[0]: r[1] for r in c.fetchall()}
-        return {"total_news": tn, "total_disasters": td, "category_counts": cats}
+        # 模型分析覆盖统计
+        c.execute("SELECT COUNT(*) FROM article_model_results"); analyzed = c.fetchone()[0]
+        return {"total_news": tn, "total_disasters": td, "category_counts": cats, "analyzed_articles": analyzed}
 
     def clear_demo_data(self):
-        """清除所有演示数据，保留真实爬虫数据"""
+        """清除所有演示数据，保留真实爬虫数据。注意：不清除 model_results！"""
         c = self.conn.cursor()
         c.execute("DELETE FROM news_articles WHERE source='demo'")
         c.execute("DELETE FROM disaster_warnings WHERE id LIKE 'w%'")

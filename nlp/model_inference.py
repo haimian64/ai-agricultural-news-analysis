@@ -132,6 +132,7 @@ class ModelNewsClassifier:
         for a in articles:
             result = self.classify(a.get("title", ""), a.get("content", ""))
             a["category"] = result["category"]
+            a["classifier_scores"] = result.get("scores", {})
         return articles
 
     @staticmethod
@@ -160,9 +161,17 @@ class ModelSentimentAnalyzer:
             self._model, self._tokenizer, self._device = _load_sentiment_model()
 
     def analyze(self, text: str) -> dict:
-        """单条文本情感分析"""
+        """单条文本情感分析
+
+        返回: {"label": "positive"|"neutral"|"negative",
+                "score": float,           # 最高概率
+                "scores": dict,            # 所有类别概率 {"positive": ..., "neutral": ..., "negative": ...}
+                "risk_score": float}
+        """
         if not text:
-            return {"label": "neutral", "score": 0.5, "risk_score": 0.0}
+            return {"label": "neutral", "score": 0.5,
+                    "scores": {"positive": 0.33, "neutral": 0.34, "negative": 0.33},
+                    "risk_score": 0.0}
 
         self._ensure_loaded()
         import torch
@@ -180,12 +189,20 @@ class ModelSentimentAnalyzer:
             best_idx = int(torch.argmax(probs).item())
             label = SENTIMENT_LABEL_ORDER[best_idx]
             score = round(float(probs[best_idx].item()), 4)
+
+            # 全部三类概率
+            all_scores = {
+                SENTIMENT_LABEL_ORDER[i]: round(float(probs[i].item()), 4)
+                for i in range(len(SENTIMENT_LABEL_ORDER))
+            }
             risk = _calc_risk(text)
 
-            return {"label": label, "score": score, "risk_score": risk}
+            return {"label": label, "score": score, "scores": all_scores, "risk_score": risk}
         except Exception as e:
             logger.warning(f"[MODEL] 情感分析失败，回退中性: {e}")
-            return {"label": "neutral", "score": 0.5, "risk_score": 0.0}
+            return {"label": "neutral", "score": 0.5,
+                    "scores": {"positive": 0.33, "neutral": 0.34, "negative": 0.33},
+                    "risk_score": 0.0}
 
     def analyze_batch(self, articles: list[dict], batch_size: int = 64) -> list[dict]:
         """批量情感分析（GPU 批量推理）"""
@@ -218,6 +235,10 @@ class ModelSentimentAnalyzer:
                     a = articles[i + j]
                     a["sentiment"] = SENTIMENT_LABEL_ORDER[int(idx.item())]
                     a["sentiment_score"] = round(float(prob_row[int(idx.item())].item()), 4)
+                    a["sentiment_scores"] = {
+                        SENTIMENT_LABEL_ORDER[k]: round(float(prob_row[k].item()), 4)
+                        for k in range(len(SENTIMENT_LABEL_ORDER))
+                    }
                     a["risk_score"] = _calc_risk(texts[i + j])
             except Exception as e:
                 logger.warning(f"[MODEL] 批量情感分析失败 (batch {i}-{i+batch_size}): {e}")

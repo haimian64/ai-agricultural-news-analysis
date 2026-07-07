@@ -27,15 +27,21 @@ class NewsClassifier:
         for cat, keywords in CATEGORY_KEYWORDS.items():
             score = sum(2 if kw in title else 1 for kw in keywords if kw in text)
             scores[cat] = score
+        total = sum(scores.values()) or 1
+        # 归一化为概率分布
+        probs = {c: round(s / total, 4) for c, s in scores.items()}
         if all(v == 0 for v in scores.values()):
-            return {"category": "综合资讯", "probabilities": {c: 0.0 for c in CATEGORIES}}
+            probs = {c: 0.0 for c in CATEGORIES}
+            probs["综合资讯"] = 1.0
+            return {"category": "综合资讯", "scores": probs}
         best = max(scores, key=scores.get)
-        return {"category": best, "probabilities": {}}
+        return {"category": best, "scores": probs}
 
     def classify_batch(self, articles):
         for article in articles:
             result = self.classify(article.get("title", ""), article.get("content", ""))
             article["category"] = result["category"]
+            article["classifier_scores"] = result.get("scores", {})
         return articles
 
     def get_categories(self):

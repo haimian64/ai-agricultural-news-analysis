@@ -24,7 +24,9 @@ class SentimentAnalyzer:
 
     def analyze(self, text):
         if not text:
-            return {"label": "neutral", "score": 0.5, "risk_score": 0.0}
+            return {"label": "neutral", "score": 0.5,
+                    "scores": {"positive": 0.33, "neutral": 0.34, "negative": 0.33},
+                    "risk_score": 0.0}
 
         pos_count = sum(1 for w in POSITIVE_WORDS if w in text)
         neg_count = sum(1 for w in NEGATIVE_WORDS if w in text)
@@ -33,6 +35,7 @@ class SentimentAnalyzer:
         if total == 0:
             label = "neutral"
             score = 0.5
+            all_scores = {"positive": 0.33, "neutral": 0.34, "negative": 0.33}
         else:
             ratio = pos_count / total
             if ratio > 0.6:
@@ -44,10 +47,16 @@ class SentimentAnalyzer:
             else:
                 label = "neutral"
                 score = 0.5
+            # 规则引擎的概率分布
+            all_scores = {
+                "positive": round(ratio, 4),
+                "neutral": round(0.5 - abs(ratio - 0.5), 4),
+                "negative": round(1 - ratio, 4),
+            }
 
         risk_score = min(sum(w for pat, w in RISK_PATTERNS if pat.search(text)), 1.0)
 
-        return {"label": label, "score": score, "risk_score": risk_score}
+        return {"label": label, "score": score, "scores": all_scores, "risk_score": risk_score}
 
     def analyze_batch(self, articles):
         for article in articles:
@@ -55,5 +64,6 @@ class SentimentAnalyzer:
             result = self.analyze(text)
             article["sentiment"] = result["label"]
             article["sentiment_score"] = result["score"]
+            article["sentiment_scores"] = result.get("scores", {})
             article["risk_score"] = result.get("risk_score", 0.0)
         return articles

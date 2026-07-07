@@ -530,60 +530,138 @@ def _get_nlp_modules():
 
 
 def _classify_and_sentiment_batch(articles, classifier, sentiment):
-    """对一批文章运行分类和情感分析（原地修改）。
+    """对一批文章运行分类和情感分析（原地修改），并收集模型结果。
 
     分类：逐条处理（零样本 pipeline 不支持批量）
     情感：优先使用 batch 推理（GPU 满载利用）
+
+    每篇文章写入字段：
+        category, classifier_scores, sentiment, sentiment_score,
+        sentiment_scores, risk_score, sentiment_name, classifier_name
     """
     if not articles:
         return
+
+    import torch
     n = len(articles)
     logger.info(f"[NLP] 对 {n} 条新闻运行分类+情感分析...")
 
-    # 分类 — 逐条（零样本 pipeline 暂不支持 batch）
+    # 判断分类器/情感分析器类型
+    clf_name = type(classifier).__name__
+    sent_name = type(sentiment).__name__
+
+    # 分类 — 逐条，保存全部分数
     for i, a in enumerate(articles):
-        a["category"] = classifier.classify(a.get("title", ""))["category"]
+        result = classifier.classify(a.get("title", ""), a.get("content", ""))
+        a["category"] = result["category"]
+        a["classifier_scores"] = result.get("scores", {})
+        a["classifier_name"] = clf_name
         if (i + 1) % max(1, n // 5) == 0:
             logger.info(f"[NLP] 分类进度: {i + 1}/{n}")
 
-    # 情感 — ModelSentimentAnalyzer 的 analyze_batch 支持 GPU 批量推理
+    # 情感 — 优先 GPU 批量
     if hasattr(sentiment, "analyze_batch"):
         sentiment.analyze_batch(articles)
     else:
-        for i, a in enumerate(articles):
+        for a in articles:
             r = sentiment.analyze(a.get("title", ""))
             a["sentiment"] = r["label"]
             a["sentiment_score"] = r["score"]
+            a["sentiment_scores"] = r.get("scores", {})
             a["risk_score"] = r.get("risk_score", 0.0)
+
+    # 补充 sentiment_name
+    for a in articles:
+        a["sentiment_name"] = sent_name
+        if "sentiment_scores" not in a:
+            a["sentiment_scores"] = {}
 
     logger.info(f"[NLP] 分类+情感分析完成: {n} 条")
 
 
+def _save_model_results_batch(db, articles):
+    """将分析结果批量写入 article_model_results 表"""
+    if not articles:
+        return
+    rows = []
+    ts = datetime.now().isoformat()
+    for a in articles:
+        rows.append({
+            "article_id": a["id"],
+            "model_mode": config.MODEL_MODE,
+            "classifier_name": a.get("classifier_name", ""),
+            "classifier_scores": a.get("classifier_scores", {}),
+            "classifier_category": a.get("category", ""),
+            "sentiment_name": a.get("sentiment_name", ""),
+            "sentiment_scores": a.get("sentiment_scores", {}),
+            "sentiment_label": a.get("sentiment", ""),
+            "sentiment_score": a.get("sentiment_score", 0.0),
+            "risk_score": a.get("risk_score", 0.0),
+            "model_params": {
+                "model_mode": config.MODEL_MODE,
+                "max_length": config.MAX_INPUT_LENGTH,
+                "categories": config.CATEGORY_LABELS,
+            },
+            "analyzed_at": ts,
+        })
+    db.save_article_model_results_batch(rows)
+
+
 def run_analysis_on_existing(db):
-    """对 DB 中已有新闻运行 NLP 分析（不爬取新数据）。
-    当 analysis_results 为空但 news_articles 有数据时使用。
+    """对 DB 中**未分析**的新闻运行 NLP 分析。
+    已分析过的新闻跳过，避免重复计算。
     """
     from nlp import HotTopicAnalyzer
 
-    arts = db.get_all_news(2000)
-    if not arts:
-        logger.info("[ANALYSIS] 数据库中没有新闻，跳过分析")
+    unanalyzed_ids = db.get_unanalyzed_article_ids(limit=5000)
+    if not unanalyzed_ids:
+        logger.info("[ANALYSIS] 所有新闻均已分析，跳过")
         return
+
+    # 根据 ID 列表获取完整文章
+    placeholders = ",".join("?" for _ in unanalyzed_ids)
+    c = db.conn.cursor()
+    c.execute(
+        f"SELECT * FROM news_articles WHERE id IN ({placeholders})",
+        unanalyzed_ids,
+    )
+    arts = [dict(r) for r in c.fetchall()]
+    if not arts:
+        logger.info("[ANALYSIS] 未找到需要分析的文章")
+        return
+
+    logger.info(f"[ANALYSIS] 待分析: {len(arts)} 条（共 {len(unanalyzed_ids)} 条未分析）")
 
     clf, sa, ha = _get_nlp_modules()
     _classify_and_sentiment_batch(arts, clf, sa)
 
+    # 保存每条新闻的模型结果
+    _save_model_results_batch(db, arts)
+
+    # 更新 news_articles 表中的分类/情感字段
+    for a in arts:
+        db.conn.execute(
+            "UPDATE news_articles SET category=?, sentiment=?, sentiment_score=?, risk_score=? WHERE id=?",
+            (a["category"], a["sentiment"], a["sentiment_score"], a["risk_score"], a["id"]),
+        )
+    db.conn.commit()
+
     # 趋势 + 热词 + 全量分析
-    trend_data = ha.trend_over_time(arts)
-    db.save_analysis("full_analysis", ha.full_analysis(arts))
+    all_arts = db.get_all_news(500)
+    trend_data = ha.trend_over_time(all_arts)
+    db.save_analysis("full_analysis", ha.full_analysis(all_arts))
     db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords(
-        [a.get("title", "") for a in arts if a.get("title")], 30)})
+        [a.get("title", "") for a in all_arts if a.get("title")], 30)})
     db.save_analysis("trend", {"trend": trend_data})
-    logger.info(f"[ANALYSIS] 已完成 {len(arts)} 条新闻的分析")
+
+    # 导出 JSON 快照
+    json_path = db.export_model_results_json()
+    logger.info(f"[ANALYSIS] 已完成 {len(arts)} 条, JSON → {json_path}")
 
 
 def run_crawl_pipeline(db):
     """执行完整的爬取+NLP+分析流水线（增量追加，不清除旧数据）。
+    仅对新爬取的文章做分析；已分析文章不重复计算。
     返回本次爬取到的文章数量。
     """
     from nlp import HotTopicAnalyzer
@@ -604,8 +682,15 @@ def run_crawl_pipeline(db):
     clf, sa, ha = _get_nlp_modules()
     _classify_and_sentiment_batch(all_a, clf, sa)
 
-    # INSERT OR IGNORE 实现增量追加，相同 ID 的文章自动跳过
+    # INSERT OR IGNORE 实现增量追加
     saved = db.save_news(all_a)
+
+    # 仅对新保存的文章存储模型结果
+    saved_ids = {a["id"] for a in all_a}
+    new_articles = [a for a in all_a if a["id"] in saved_ids] if saved != len(all_a) else all_a
+    if new_articles:
+        _save_model_results_batch(db, new_articles)
+
     arts = db.get_all_news(500)
     logger.info(f"[CRAWL] 爬取 {len(all_a)} 条, 新增保存 {saved} 条, DB中累计 {len(arts)} 条")
 
@@ -618,11 +703,15 @@ def run_crawl_pipeline(db):
         cats_found[c] = cats_found.get(c, 0) + 1
     logger.info(f"[CRAWL] 类别分布: {cats_found}")
 
-    # 对 DB 中全部文章重新做趋势分析
+    # 重新做趋势分析
     trend_data = ha.trend_over_time(arts)
     db.save_analysis("full_analysis", ha.full_analysis(arts))
     db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords([a.get("title", "") for a in arts], 30)})
     db.save_analysis("trend", {"trend": trend_data})
+
+    # 导出 JSON
+    json_path = db.export_model_results_json()
+    logger.info(f"[CRAWL] JSON 结果 → {json_path}")
 
     return len(all_a)
 
@@ -630,7 +719,47 @@ def run_crawl_pipeline(db):
 async def handle_crawl(request):
     """Manual crawl trigger - 增量追加模式，不清除已有数据"""
     count = run_crawl_pipeline(get_db())
-    return json_resp({"crawled": count, "total": get_db().get_statistics()["total_news"]})
+    stats = get_db().get_statistics()
+    return json_resp({
+        "crawled": count,
+        "total": stats["total_news"],
+        "analyzed": stats.get("analyzed_articles", 0),
+    })
+
+
+async def handle_model_results(request):
+    """获取模型推理结果详情。
+    支持 ?article_id=xxx 查询单条，否则返回汇总列表。
+    支持 ?export=1 触发 JSON 导出。
+    """
+    try:
+        article_id = request.query.get("article_id", None)
+        do_export = request.query.get("export", None)
+
+        if do_export:
+            path = get_db().export_model_results_json()
+            return json_resp({"exported": True, "path": path})
+
+        if article_id:
+            r = get_db().get_article_model_result(article_id)
+            if r:
+                return json_resp(r)
+            return json_resp({"error": "未找到该文章的分析结果"}, 404)
+
+        # 汇总列表
+        limit = int(request.query.get("limit", "50"))
+        offset = int(request.query.get("offset", "0"))
+        articles = get_db().get_articles_with_model_results(limit, offset)
+        return json_resp({
+            "total": len(articles),
+            "limit": limit,
+            "offset": offset,
+            "articles": articles,
+        })
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 def create_app():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
@@ -646,6 +775,7 @@ def create_app():
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/weather", handle_weather)
     app.router.add_get("/api/crawl", handle_crawl)
+    app.router.add_get("/api/model-results", handle_model_results)
     app.router.add_get("/dashboard", handle_dashboard)
     sd = str(config.BASE_DIR / "frontend" / "static")
     app.router.add_static("/static/", sd)
