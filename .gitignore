@@ -14,3 +14,4 @@ venv/
 *.db-shm
 data/raw/news/*.json
 CLAUDE.md
+.idea/
