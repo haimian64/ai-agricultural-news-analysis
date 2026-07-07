@@ -1,85 +1,117 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>农业新闻分析与预警系统</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-<link rel="stylesheet" href="/static/css/dashboard.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>农业新闻分析与预警系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
 </head>
 <body>
 <header class="header">
-<h1>农业新闻分析与预警</h1>
-<div class="header-controls">
-<div class="date-filter">
-<label>日期筛选：</label>
-<input type="date" id="startDate"><span> — </span><input type="date" id="endDate">
-<button id="btnFilter" class="btn-sm btn-primary">筛选</button>
-<button id="btnReset" class="btn-sm btn-outline">重置</button>
-</div>
-<button id="btnCrawl" class="btn-sm btn-crawl" onclick="startCrawl()">🔄 爬取实时新闻</button>
-<div class="status"><span class="dot"></span><span id="statusText">系统运行中</span></div>
-</div>
+    <h1>农业新闻分析与预警</h1>
+    <div class="header-controls">
+        <div class="date-filter">
+            <label>日期筛选：</label>
+            <input type="date" id="startDate"><span> — </span><input type="date" id="endDate">
+            <button id="btnFilter" class="btn-sm btn-primary">筛选</button>
+            <button id="btnReset" class="btn-sm btn-outline">重置</button>
+        </div>
+        <button id="btnCrawl" class="btn-sm btn-crawl" onclick="startCrawl()">🔄 爬取实时新闻</button>
+        <div class="status"><span class="dot"></span><span id="statusText">系统运行中</span></div>
+    </div>
 </header>
 <div class="tab-bar">
-<button class="tab-btn active" data-tab="news">新闻分析</button>
-<button class="tab-btn" data-tab="weather">天气预报</button>
-<button class="tab-btn" data-tab="market">市场动态</button>
-<button class="tab-btn" data-tab="disaster">灾害预警</button>
+    <button class="tab-btn active" data-tab="news">新闻分析</button>
+    <button class="tab-btn" data-tab="weather">天气预报</button>
+    <button class="tab-btn" data-tab="market">市场动态</button>
+    <button class="tab-btn" data-tab="disaster">灾害预警</button>
 </div>
 <div class="tab-content" id="tabNews">
-<div class="stats-row">
-<div class="stat-card"><div class="value" id="stat-news">--</div><div class="label">新闻总数</div></div>
-<div class="stat-card"><div class="value" id="stat-disasters">--</div><div class="label">灾害预警</div></div>
-<div class="stat-card"><div class="value" id="stat-categories">--</div><div class="label">分类数量</div></div>
-<div class="stat-card"><div class="value" id="stat-sentiment-score">--</div><div class="label">舆情得分</div></div>
-</div>
-<div class="charts-row">
-<div class="chart-card"><h3>新闻分类分布</h3><div class="chart-container" id="chartCategory"></div></div>
-<div class="chart-card"><h3>情感分析</h3><div class="chart-container" id="chartSentiment"></div></div>
-</div>
-<div class="charts-row">
-<div class="chart-card"><h3>新闻趋势</h3><div class="chart-container" id="chartTrend"></div></div>
-<div class="chart-card"><h3>热点关键词 <button id="btnKeywords" class="btn-sm" style="float:right">刷新</button></h3>
-<div class="keyword-cloud" id="keywordCloud"></div></div>
-</div>
-<div id="keywordNewsRow" class="charts-row" style="display:none">
-<div class="chart-card chart-card-full">
-<h3>相关新闻 <span id="keywordNewsTitle"></span>
-<button id="btnCloseKeywordNews" class="btn-sm" style="float:right;background:red;color:white;border:none">X 关闭</button></h3>
-<div id="keywordNewsList" class="news-list"></div>
-</div></div>
-<div class="charts-row">
-<div class="chart-card chart-card-full"><h3>最新新闻</h3><div id="newsList" class="news-list"></div></div>
-</div>
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="value" id="stat-news">--</div>
+            <div class="label">新闻总数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="stat-disasters">--</div>
+            <div class="label">灾害预警</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="stat-categories">--</div>
+            <div class="label">分类数量</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="stat-sentiment-score">--</div>
+            <div class="label">舆情得分</div>
+        </div>
+    </div>
+    <div class="charts-row">
+        <div class="chart-card"><h3>新闻分类分布</h3>
+            <div class="chart-container" id="chartCategory"></div>
+        </div>
+        <div class="chart-card"><h3>情感分析</h3>
+            <div class="chart-container" id="chartSentiment"></div>
+        </div>
+    </div>
+    <div class="charts-row">
+        <div class="chart-card"><h3>新闻趋势</h3>
+            <div class="chart-container" id="chartTrend"></div>
+        </div>
+        <div class="chart-card">
+            <h3>热点关键词
+                <button id="btnKeywords" class="btn-sm" style="float:right">刷新</button>
+            </h3>
+            <div class="keyword-cloud" id="keywordCloud"></div>
+        </div>
+    </div>
+    <div id="keywordNewsRow" class="charts-row" style="display:none">
+        <div class="chart-card chart-card-full">
+            <h3>相关新闻 <span id="keywordNewsTitle"></span>
+                <button id="btnCloseKeywordNews" class="btn-sm"
+                        style="float:right;background:red;color:white;border:none">X 关闭
+                </button>
+            </h3>
+            <div id="keywordNewsList" class="news-list"></div>
+        </div>
+    </div>
+    <div class="charts-row">
+        <div class="chart-card chart-card-full"><h3>最新新闻</h3>
+            <div id="newsList" class="news-list"></div>
+        </div>
+    </div>
 </div>
 <div class="tab-content" id="tabWeather" style="display:none">
-<div class="weather-page">
-<div class="weather-controls">
-<label>城市：</label>
-<select id="weatherCity">
-<option value="郑州">郑州</option><option value="北京">北京</option>
-<option value="上海">上海</option><option value="广州">广州</option>
-<option value="深圳">深圳</option><option value="哈尔滨">哈尔滨</option>
-<option value="成都">成都</option><option value="武汉">武汉</option>
-<option value="西安">西安</option><option value="南京">南京</option><option value="杭州">杭州</option>
-</select>
-<button id="btnRefreshWeather" class="btn-sm btn-primary">刷新</button>
+    <div class="weather-page">
+        <div class="weather-controls">
+            <label>省份：</label>
+            <select id="weatherProvince">
+                <option value="">-- 请选择省份 --</option>
+            </select>
+            <label>城市：</label>
+            <select id="weatherCity">
+                <option value="">-- 请先选择省份 --</option>
+            </select>
+            <button id="btnRefreshWeather" class="btn-sm btn-primary">刷新</button>
+        </div>
+        <div id="weatherCurrent" class="weather-current"></div>
+        <div id="weatherForecast" class="weather-forecast"></div>
+    </div>
 </div>
-<div id="weatherCurrent" class="weather-current"></div>
-<div id="weatherForecast" class="weather-forecast"></div>
-</div></div>
 <div class="tab-content" id="tabMarket" style="display:none">
-<div class="market-page">
-<div class="market-header"><h3>市场动态</h3><button id="btnMarket" class="btn-sm btn-primary">刷新</button></div>
-<div id="marketList" class="market-list"></div>
-</div></div>
-<div class="tab-content" id="tabDisaster" style="display:none">
-<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px 0">
-<h2 style="color:red;margin:0">实时灾害预警</h2>
-<button id="btnRefreshDisasters" class="btn-sm btn-primary">刷新</button>
+    <div class="market-page">
+        <div class="market-header"><h3>市场动态</h3>
+            <button id="btnMarket" class="btn-sm btn-primary">刷新</button>
+        </div>
+        <div id="marketList" class="market-list"></div>
+    </div>
 </div>
-<div class="disaster-grid" id="disasterList" style="padding:12px 24px 24px"></div>
+<div class="tab-content" id="tabDisaster" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px 0">
+        <h2 style="color:red;margin:0">实时灾害预警</h2>
+        <button id="btnRefreshDisasters" class="btn-sm btn-primary">刷新</button>
+    </div>
+    <div class="disaster-grid" id="disasterList" style="padding:12px 24px 24px"></div>
 </div>
 <script src="/static/js/dashboard.js"></script>
 </body>
