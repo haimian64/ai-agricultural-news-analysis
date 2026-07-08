@@ -6,11 +6,20 @@ import re
 import jieba
 from collections import Counter, defaultdict
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 class HotTopicAnalyzer:
     """Hot topic and trend analyzer"""
+
+    def __init__(self):
+        dict_path = Path(__file__).parent.parent / "data" / "agricultural_dict.txt"
+        if dict_path.exists():
+            jieba.load_userdict(str(dict_path))
+            logger.info(f"已加载农业自定义词典: {dict_path}")
+        else:
+            logger.warning(f"农业词典未找到: {dict_path}")
 
     def extract_keywords(self, texts, top_k=20):
         """TF-based keyword extraction using jieba segmentation"""

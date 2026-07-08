@@ -38,6 +38,13 @@ class Config:
     CRAWL_INTERVAL_MINUTES = 60
     ANALYSIS_INTERVAL_MINUTES = 30
 
+    # 聊天机器人
+    CHATBOT_ENABLED = True
+    GRADIO_PORT = 7860
+    CHATBOT_MODEL = "Qwen2.5-3B-Instruct"
+    MAX_CONVERSATION_TURNS = 20
+    MAX_TOOL_CALL_ROUNDS = 3
+
     # 路径
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"

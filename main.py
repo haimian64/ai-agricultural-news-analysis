@@ -34,6 +34,26 @@ def main():
     else:
         logger.info("数据库中没有新闻，请点击「爬取实时新闻」获取数据。")
 
+    # 启动 Gradio 聊天机器人在后台线程
+    if config.CHATBOT_ENABLED:
+        import threading
+        from backend.chatbot import create_chatbot_app
+        chatbot_app = create_chatbot_app(db)
+        def _run_gradio():
+            chatbot_app.launch(
+                server_name="0.0.0.0",
+                server_port=config.GRADIO_PORT,
+                prevent_thread_lock=False,
+                share=False,
+                show_error=True,
+                quiet=True,
+            )
+        gradio_thread = threading.Thread(target=_run_gradio, daemon=True)
+        gradio_thread.start()
+        # 等待 Gradio 绑定端口
+        time.sleep(2)
+        logger.info(f"AI 助手 (Gradio): http://localhost:{config.GRADIO_PORT}")
+
     # 启动服务器（以下代码不变）
     import socket
     for port in range(8000, 8010):
@@ -74,6 +94,12 @@ def main():
         logger.info("收到停止信号，正在关闭服务器...")
     finally:
         loop.run_until_complete(runner.cleanup())
+        # 释放聊天机器人模型显存
+        try:
+            from backend.chatbot import unload_chatbot_model
+            unload_chatbot_model()
+        except Exception:
+            pass
         logger.info("服务器已停止。")
 
 if __name__ == "__main__":

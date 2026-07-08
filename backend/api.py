@@ -1,6 +1,7 @@
 """API路由 - 添加搜索/日期筛选/情感摘要/市场数据端点"""
-import json, logging, re
+import asyncio, json, logging, re
 from datetime import datetime
+import aiohttp
 from aiohttp import web
 from config import config
 
@@ -760,6 +761,109 @@ async def handle_model_results(request):
         return json_resp({"error": str(e)}, 500)
 
 
+async def handle_chat_proxy(request):
+    """Reverse-proxy requests to Gradio on localhost:7860 (WebSocket-capable)."""
+    gradio_port = config.GRADIO_PORT if hasattr(config, "GRADIO_PORT") else 7860
+    path = request.match_info.get("path", "")
+    target_url = f"http://localhost:{gradio_port}/{path}"
+    if request.query_string:
+        target_url += "?" + request.query_string
+
+    # Forward headers (exclude hop-by-hop)
+    forward_headers = {}
+    for k, v in request.headers.items():
+        kl = k.lower()
+        if kl in ("host", "content-length", "transfer-encoding", "connection", "upgrade"):
+            continue
+        forward_headers[k] = v
+
+    try:
+        # Handle WebSocket upgrade
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await _proxy_websocket(request, target_url)
+
+        # Regular HTTP proxy
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                method=request.method,
+                url=target_url,
+                headers=forward_headers,
+                data=await request.read(),
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                response = web.StreamResponse(
+                    status=resp.status,
+                    headers={
+                        k: v for k, v in resp.headers.items()
+                        if k.lower() not in ("x-frame-options", "content-security-policy")
+                    },
+                )
+                await response.prepare(request)
+                async for chunk in resp.content.iter_any():
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+    except aiohttp.ClientError as e:
+        logger.warning(f"[Proxy] Gradio 连接失败: {e}")
+        return json_resp({"error": "AI 助手服务未启动，请稍后重试"}, 503)
+
+
+async def _proxy_websocket(request, target_url):
+    """Proxy WebSocket connection to Gradio."""
+    try:
+        async with aiohttp.ClientSession() as ws_client:
+            # Connect to Gradio WebSocket
+            target_ws = await ws_client.ws_connect(
+                target_url.replace("http://", "ws://").replace("https://", "wss://"),
+                headers={
+                    k: v for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length", "connection", "upgrade",
+                                           "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions")
+                },
+                timeout=30,
+            )
+
+            # Create WebSocket response to client
+            ws_server = web.WebSocketResponse()
+            await ws_server.prepare(request)
+
+            async def forward_client_to_target():
+                """Forward messages from browser → Gradio."""
+                async for msg in ws_server:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        await target_ws.send_str(msg.data)
+                    elif msg.type == aiohttp.WSMsgType.BINARY:
+                        await target_ws.send_bytes(msg.data)
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+                        break
+
+            async def forward_target_to_client():
+                """Forward messages from Gradio → browser."""
+                async for msg in target_ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        await ws_server.send_str(msg.data)
+                    elif msg.type == aiohttp.WSMsgType.BINARY:
+                        await ws_server.send_bytes(msg.data)
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+                        break
+
+            # Run both directions concurrently
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.ensure_future(forward_client_to_target()),
+                    asyncio.ensure_future(forward_target_to_client()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+
+            return ws_server
+    except Exception as e:
+        logger.warning(f"[Proxy] WebSocket 代理失败: {e}")
+        return json_resp({"error": "WebSocket 连接失败"}, 502)
+
+
 def create_app():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
@@ -779,4 +883,9 @@ def create_app():
     app.router.add_get("/dashboard", handle_dashboard)
     sd = str(config.BASE_DIR / "frontend" / "static")
     app.router.add_static("/static/", sd)
+
+    # Chatbot proxy to Gradio (WebSocket-capable)
+    app.router.add_route("*", "/chat_app", handle_chat_proxy)
+    app.router.add_route("*", "/chat_app/{path:.*}", handle_chat_proxy)
+
     return app

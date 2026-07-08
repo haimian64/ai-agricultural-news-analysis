@@ -6,6 +6,7 @@
     <title>农业新闻分析与预警系统</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="stylesheet" href="/static/css/chatbot.css">
 </head>
 <body>
 <header class="header">
@@ -114,5 +115,19 @@
     <div class="disaster-grid" id="disasterList" style="padding:12px 24px 24px"></div>
 </div>
 <script src="/static/js/dashboard.js"></script>
+<script src="/static/js/chatbot.js"></script>
+
+<!-- Floating AI Assistant -->
+<div id="chatbotFAB" class="chatbot-fab" title="AI 助手">💬</div>
+<div id="chatbotPanel" class="chatbot-panel">
+    <div class="chatbot-panel-header">
+        <span>🤖 农业新闻 AI 助手</span>
+        <button id="chatbotClose" class="chatbot-close-btn">&times;</button>
+    </div>
+    <div class="chatbot-panel-body">
+        <iframe id="chatbotIframe" frameborder="0" allow="clipboard-write"
+                title="AI Chat Assistant" data-gradio-url="http://localhost:7860"></iframe>
+    </div>
+</div>
 </body>
 </html>
