@@ -84,9 +84,8 @@ agricultural-news-analysis/
 ├── start.bat                 # Windows 启动脚本
 │
 ├── crawler/                    # 爬虫模块
-│   ├── sources.py              # 新闻源与灾害源定义
-│   ├── news_crawler.py         # 新闻爬取器
-│   └── disaster_crawler.py     # 灾害预警爬取器
+│   ├── sources.py              # 新闻源定义
+│   └── news_crawler.py         # 新闻爬取器
 │
 ├── nlp/                        # NLP 分析模块
 │   ├── preprocessor.py         # 中文文本预处理与分词
@@ -112,7 +111,9 @@ agricultural-news-analysis/
 │       └── js/dashboard.js       # ECharts 图表逻辑
 │
 ├── data/                       # 运行时数据（自动生成）
-│   └── agricultural_news.db    # SQLite 数据库
+│   ├── agricultural_news.db    # SQLite 数据库
+│   ├── raw/                    # 爬取原始 JSON 快照
+│   └── analysis/               # 模型分析结果 JSON 导出
 │
 └── tests/                      # 测试脚本
     ├── test_crawler.py
@@ -156,7 +157,8 @@ agricultural-news-analysis/
 | `/api/analysis/sentiment-summary` | GET | 情感摘要及综合评分（支持 `start_date` `end_date`） |
 | `/api/market` | GET | 市场行情数据（实时抓取 agri.cn，非数据库查询） |
 | `/api/weather` | GET | 天气预报，参数 `city`（默认 `郑州`，支持 ~350+ 城市） |
-| `/api/crawl` | GET | 手动触发增量爬取 + NLP 流水线（INSERT OR IGNORE，不丢数据） |
+| `/api/crawl` | GET | 手动触发增量爬取（支持 `start_date` `end_date` 日期过滤），三步流程：爬取新文章 → 补分析未分析旧文章 → 重新生成聚合分析 |
+| `/api/model-results` | GET | 模型推理结果详情，支持 `?article_id=xxx` 查单条、`?export=1` 导出 JSON |
 | `/dashboard` | GET | 仪表盘页面 |
 
 ## 数据库
@@ -165,7 +167,8 @@ agricultural-news-analysis/
 
 - `news_articles` — 新闻文章（标题、来源、分类、情感、风险评分等）
 - `disaster_warnings` — 灾害预警（区域、等级、灾害类型等）
-- `analysis_results` — 分析结果缓存
+- `analysis_results` — 聚合分析结果缓存（趋势、热词、综合报告）
+- `article_model_results` — 每条新闻的模型推理详情（分类分数、情感分数、模型参数、分析时间戳）
 - `market_data` — 市场行情数据
 
 ## 运行测试
@@ -179,8 +182,9 @@ python tests/test_nlp.py
 
 ## 重要说明
 
-- **增量爬取**：每次点击"爬取实时新闻"或调用 `/api/crawl` 均为增量模式（`INSERT OR IGNORE`），不会删除已有数据。爬虫会根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。
-- **首次启动**：如果数据库中有新闻但缺少分析结果，`main.py` 会自动补齐分析数据，无需手动操作。
+- **增量爬取**：每次点击"爬取实时新闻"或调用 `/api/crawl` 均为增量模式（`INSERT OR IGNORE`），不会删除已有数据。爬虫会根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。支持通过前端日期选择器过滤爬取范围。
+- **分析结果持久化**：每条新闻的 NLP 分析结果（分类全部分数、情感全部分数、风险评分、模型参数）保存在 `article_model_results` 表中，同时自动导出为 `data/analysis/model_results_*.json` 便于离线查看。已分析过的文章不会重复分析。
+- **启动行为**：`main.py` 启动后立即展示最近一次的分析结果（从已有数据生成聚合分析），**不在启动时自动爬取或分析**。点击仪表盘"爬取实时新闻"按钮后依次执行：爬取新文章 → 补分析未分析旧文章 → 重新生成聚合分析。
 - **定时调度**：`NewsScheduler` 类已实现但 `main.py` 默认不启动，爬取需通过仪表盘按钮手动触发。如需定时自动爬取，可在代码中自行启用。
 
 ## NLP 模式

@@ -14,17 +14,15 @@ logger = logging.getLogger(__name__)
 class NewsScheduler:
     """轻量定时调度器 (threading-based)"""
 
-    def __init__(self, db, crawler=None, disaster_crawler=None, nlp_modules=None):
+    def __init__(self, db, crawler=None, nlp_modules=None):
         self.db = db
         self.news_crawler = crawler
-        self.disaster_crawler = disaster_crawler
         self.nlp = nlp_modules or {}
         self._running = False
         self._timers = []
 
-    def set_crawlers(self, news_crawler, disaster_crawler):
+    def set_crawler(self, news_crawler):
         self.news_crawler = news_crawler
-        self.disaster_crawler = disaster_crawler
 
     def _crawl_news_task(self):
         logger.info("[定时] 抓取新闻...")
@@ -36,23 +34,10 @@ class NewsScheduler:
                         articles = self.nlp["classifier"].classify_batch(articles)
                     if self.nlp.get("sentiment"):
                         articles = self.nlp["sentiment"].analyze_batch(articles)
-                    if self.nlp.get("summarizer"):
-                        articles = self.nlp["summarizer"].summarize_batch(articles)
                     self.db.save_news(articles)
                 logger.info(f"[定时] 新闻: {len(articles)} 条")
         except Exception as e:
             logger.error(f"[定时] 新闻抓取失败: {e}")
-
-    def _crawl_disaster_task(self):
-        logger.info("[定时] 灾害预警...")
-        try:
-            if self.disaster_crawler:
-                warnings = self.disaster_crawler.crawl_disaster_warnings()
-                if warnings:
-                    self.db.save_disasters(warnings)
-                logger.info(f"[定时] 预警: {len(warnings)} 条")
-        except Exception as e:
-            logger.error(f"[定时] 预警抓取失败: {e}")
 
     def _analyze_task(self):
         logger.info("[定时] 分析数据...")
@@ -90,15 +75,13 @@ class NewsScheduler:
         if self._running:
             return
         self._running = True
-        logger.info(f"调度器启动: 新闻({config.CRAWL_INTERVAL_MINUTES}min), 预警({config.CRAWL_INTERVAL_MINUTES}min), 分析({config.ANALYSIS_INTERVAL_MINUTES}min)")
+        logger.info(f"调度器启动: 新闻({config.CRAWL_INTERVAL_MINUTES}min), 分析({config.ANALYSIS_INTERVAL_MINUTES}min)")
         self._schedule(self._crawl_news_task, config.CRAWL_INTERVAL_MINUTES)
-        self._schedule(self._crawl_disaster_task, config.CRAWL_INTERVAL_MINUTES)
         self._schedule(self._analyze_task, config.ANALYSIS_INTERVAL_MINUTES)
 
     def run_once(self):
         logger.info("[手动] 全量任务开始...")
         self._crawl_news_task()
-        self._crawl_disaster_task()
         self._analyze_task()
         logger.info("[手动] 全量任务完成")
 

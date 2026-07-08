@@ -11,14 +11,6 @@ class NewsSource:
     page_start: int = 1
     page_url_template: str = ""  # 分页模板，如 "https://www.agri.cn/zx/nyyw/index_{page}.htm"
 
-@dataclass  
-class DisasterSource:
-    name: str
-    url: str
-    encoding: str = "utf-8"
-    region: str = ""
-    selector: str = ""
-
 # === 农业新闻源（实测可用）===
 # 使用更通用的选择器，匹配多种常见的列表页HTML结构
 NEWS_SOURCES = [
@@ -96,21 +88,4 @@ NEWS_SOURCES = [
                title_selector="a",
                date_selector="span",
                page_url_template="http://www.mwr.gov.cn/xw/slyw/index_{page}.htm"),
-    
-
-    
-]
-
-DISASTER_SOURCES = [
-    DisasterSource(name="中国天气网灾害预警", url="http://www.weather.com.cn/alarm/",
-                   region="全国", selector="ul.alarm-list li"),
-    # 中国气象网 - 气象灾害预警
-    DisasterSource(name="中国气象网-灾害预警", url="https://www.cma.gov.cn/2011xwzx/2011xqxxw/2011xyj/",
-                   region="全国", selector="ul li"),
-    # 水利部 -  flood warnings
-    DisasterSource(name="水利部-水旱灾害防御", url="http://www.mwr.gov.cn/xw/slyw/",
-                   region="全国", selector="ul li"),
-    # 自然资源部 - 地质灾害预警
-    DisasterSource(name="自然资源部-地质灾害", url="http://www.mnr.gov.cn/dt/zhfp/",
-                   region="全国", selector="ul li"),
 ]
