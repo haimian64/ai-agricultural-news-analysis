@@ -356,55 +356,55 @@
     }
 
     function initWeather() {
-    // 填充省份下拉框
-    var provinceSel = document.getElementById("weatherProvince");
-    var provinces = Object.keys(PROVINCE_CITIES).sort();
-    provinces.forEach(function(p) {
-        var opt = document.createElement("option");
-        opt.value = p;
-        opt.textContent = p;
-        provinceSel.appendChild(opt);
-    });
+        // 填充省份下拉框
+        var provinceSel = document.getElementById("weatherProvince");
+        var provinces = Object.keys(PROVINCE_CITIES).sort();
+        provinces.forEach(function (p) {
+            var opt = document.createElement("option");
+            opt.value = p;
+            opt.textContent = p;
+            provinceSel.appendChild(opt);
+        });
 
-    // 省份变化 -> 更新城市列表
-    provinceSel.onchange = function() {
-        var citySel = document.getElementById("weatherCity");
-        var selectedProvince = this.value;
-        citySel.innerHTML = '<option value="">-- 请选择城市 --</option>';
-        if (selectedProvince && PROVINCE_CITIES[selectedProvince]) {
-            var cities = PROVINCE_CITIES[selectedProvince];
-            cities.forEach(function(c) {
-                var opt = document.createElement("option");
-                opt.value = c;
-                opt.textContent = c;
-                citySel.appendChild(opt);
-            });
-        }
-        // 自动加载第一个城市
-        if (citySel.options.length > 1) {
-            citySel.selectedIndex = 1;
-            loadWeather();
-        }
-    };
-
-    // 城市变化 -> 加载天气
-    document.getElementById("weatherCity").onchange = function() {
-        if (this.value) loadWeather();
-    };
-
-    // 默认选中第一个省份（河南省）
-    if (provinceSel.options.length > 0) {
-        // 尝试选中河南省
-        for (var i = 0; i < provinceSel.options.length; i++) {
-            if (provinceSel.options[i].value === "河南省") {
-                provinceSel.selectedIndex = i;
-                break;
+        // 省份变化 -> 更新城市列表
+        provinceSel.onchange = function () {
+            var citySel = document.getElementById("weatherCity");
+            var selectedProvince = this.value;
+            citySel.innerHTML = '<option value="">-- 请选择城市 --</option>';
+            if (selectedProvince && PROVINCE_CITIES[selectedProvince]) {
+                var cities = PROVINCE_CITIES[selectedProvince];
+                cities.forEach(function (c) {
+                    var opt = document.createElement("option");
+                    opt.value = c;
+                    opt.textContent = c;
+                    citySel.appendChild(opt);
+                });
             }
+            // 自动加载第一个城市
+            if (citySel.options.length > 1) {
+                citySel.selectedIndex = 1;
+                loadWeather();
+            }
+        };
+
+        // 城市变化 -> 加载天气
+        document.getElementById("weatherCity").onchange = function () {
+            if (this.value) loadWeather();
+        };
+
+        // 默认选中第一个省份（河南省）
+        if (provinceSel.options.length > 0) {
+            // 尝试选中河南省
+            for (var i = 0; i < provinceSel.options.length; i++) {
+                if (provinceSel.options[i].value === "河南省") {
+                    provinceSel.selectedIndex = i;
+                    break;
+                }
+            }
+            if (provinceSel.selectedIndex === 0) provinceSel.selectedIndex = 1;
+            provinceSel.onchange();
         }
-        if (provinceSel.selectedIndex === 0) provinceSel.selectedIndex = 1;
-        provinceSel.onchange();
     }
-}
 
     // Tab Switching
     document.querySelectorAll(".tab-btn").forEach(function (btn) {
@@ -448,54 +448,54 @@
     }
 
     async function loadWeather() {
-    var city = document.getElementById("weatherCity").value;
-    if (!city) {
-        byId("weatherCurrent").innerHTML = "<div class='weather-empty'>请选择城市</div>";
-        byId("weatherForecast").innerHTML = "";
-        return;
-    }
-    var data = await fetchJSON(API+"/weather?city="+encodeURIComponent(city));
-    if (!data || !data.current) {
-        byId("weatherCurrent").innerHTML = "<div class='weather-empty'>暂无天气数据</div>";
-        byId("weatherForecast").innerHTML = "";
-        return;
-    }
-    var cur = data.current;
-    var wc = cur.weathercode||0;
-    var desc = wmoCode(wc)||"";
-    var icon = wmoIco(wc);
-    // 当前天气大卡片
-    byId("weatherCurrent").innerHTML =
-        "<div class='weather-current-card'>" +
-            "<div class='weather-city-name'>"+city+"</div>" +
-            "<div class='weather-temp-row'><span class='weather-temp-big'>"+cur.temperature+"</span><span class='weather-temp-unit'>°C</span></div>" +
-            "<div class='weather-icon-big'>"+icon+"</div>" +
-            "<div class='weather-desc'>"+desc+"</div>" +
-            "<div class='weather-wind'>风速 "+(cur.windspeed||0)+" km/h</div>" +
-        "</div>";
-    // 7天预报
-    var daily = data.daily;
-    if (daily && daily.time) {
-        var weekDays = ["周日","周一","周二","周三","周四","周五","周六"];
-        var html2 = daily.time.map(function(t,i){
-            var hi = (daily.temperature_2m_max||[])[i]||"-";
-            var lo = (daily.temperature_2m_min||[])[i]||"-";
-            var rain = (daily.precipitation_sum||[])[i];
-            var wc2 = (daily.weathercode||[])[i]||0;
-            var d = new Date(t);
-            var dayLabel = (i===0) ? "今天" : weekDays[d.getDay()];
-            return "<div class='weather-day'>" +
-                "<div class='wd-day'>"+dayLabel+"</div>" +
-                "<div class='wd-date'>"+t.slice(5)+"</div>" +
-                "<div class='wd-icon'>"+wmoIco(wc2)+"</div>" +
-                "<div class='wd-desc'>"+(wmoCode(wc2)||"")+"</div>" +
-                "<div class='wd-temp'><span class='wd-high'>"+hi+"°</span> / <span class='wd-low'>"+lo+"°</span></div>" +
-                (rain>0 ? "<div class='wd-rain'>💧 "+rain+"mm</div>":"<div class='wd-rain'>—</div>") +
+        var city = document.getElementById("weatherCity").value;
+        if (!city) {
+            byId("weatherCurrent").innerHTML = "<div class='weather-empty'>请选择城市</div>";
+            byId("weatherForecast").innerHTML = "";
+            return;
+        }
+        var data = await fetchJSON(API + "/weather?city=" + encodeURIComponent(city));
+        if (!data || !data.current) {
+            byId("weatherCurrent").innerHTML = "<div class='weather-empty'>暂无天气数据</div>";
+            byId("weatherForecast").innerHTML = "";
+            return;
+        }
+        var cur = data.current;
+        var wc = cur.weathercode || 0;
+        var desc = wmoCode(wc) || "";
+        var icon = wmoIco(wc);
+        // 当前天气大卡片
+        byId("weatherCurrent").innerHTML =
+            "<div class='weather-current-card'>" +
+            "<div class='weather-city-name'>" + city + "</div>" +
+            "<div class='weather-temp-row'><span class='weather-temp-big'>" + cur.temperature + "</span><span class='weather-temp-unit'>°C</span></div>" +
+            "<div class='weather-icon-big'>" + icon + "</div>" +
+            "<div class='weather-desc'>" + desc + "</div>" +
+            "<div class='weather-wind'>风速 " + (cur.windspeed || 0) + " km/h</div>" +
             "</div>";
-        }).join("");
-        byId("weatherForecast").innerHTML = html2;
+        // 7天预报
+        var daily = data.daily;
+        if (daily && daily.time) {
+            var weekDays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+            var html2 = daily.time.map(function (t, i) {
+                var hi = (daily.temperature_2m_max || [])[i] || "-";
+                var lo = (daily.temperature_2m_min || [])[i] || "-";
+                var rain = (daily.precipitation_sum || [])[i];
+                var wc2 = (daily.weathercode || [])[i] || 0;
+                var d = new Date(t);
+                var dayLabel = (i === 0) ? "今天" : weekDays[d.getDay()];
+                return "<div class='weather-day'>" +
+                    "<div class='wd-day'>" + dayLabel + "</div>" +
+                    "<div class='wd-date'>" + t.slice(5) + "</div>" +
+                    "<div class='wd-icon'>" + wmoIco(wc2) + "</div>" +
+                    "<div class='wd-desc'>" + (wmoCode(wc2) || "") + "</div>" +
+                    "<div class='wd-temp'><span class='wd-high'>" + hi + "°</span> / <span class='wd-low'>" + lo + "°</span></div>" +
+                    (rain > 0 ? "<div class='wd-rain'>💧 " + rain + "mm</div>" : "<div class='wd-rain'>—</div>") +
+                    "</div>";
+            }).join("");
+            byId("weatherForecast").innerHTML = html2;
+        }
     }
-}
 
     document.getElementById("btnRefreshWeather").onclick = loadWeather;
     document.getElementById("weatherCity").onchange = loadWeather;
@@ -507,8 +507,17 @@
         btn.disabled = true;
         btn.textContent = "⏳ 爬取中...";
         btn.style.opacity = "0.6";
+
+        // 获取日期范围
+        var startDate = document.getElementById('startDate').value;
+        var endDate = document.getElementById('endDate').value;
+        var url = API + "/crawl";
+        if (startDate && endDate) {
+            url += "?start_date=" + encodeURIComponent(startDate) + "&end_date=" + encodeURIComponent(endDate);
+        }
+
         try {
-            var result = await fetchJSON(API + "/crawl");
+            var result = await fetchJSON(url);
             if (result) {
                 setText("statusText", "已爬取 " + (result.crawled || 0) + " 条, 共 " + (result.total || 0) + " 条");
                 // Refresh all data

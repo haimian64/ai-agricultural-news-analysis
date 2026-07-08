@@ -8,6 +8,7 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+
 class DatabaseManager:
     def __init__(self, db_path=None):
         if db_path == ":memory:":
@@ -75,11 +76,11 @@ class DatabaseManager:
         for a in articles:
             try:
                 c.execute("INSERT OR IGNORE INTO news_articles VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (a["id"], a.get("title",""), a.get("url",""), a.get("source",""),
-                     a.get("date",""), a.get("content",""), a.get("summary",""),
-                     a.get("category","综合资讯"), a.get("sentiment","neutral"),
-                     a.get("sentiment_score",0.5), a.get("risk_score",0.0),
-                     a.get("crawled_at","")))
+                          (a["id"], a.get("title", ""), a.get("url", ""), a.get("source", ""),
+                           a.get("date", ""), a.get("content", ""), a.get("summary", ""),
+                           a.get("category", "综合资讯"), a.get("sentiment", "neutral"),
+                           a.get("sentiment_score", 0.5), a.get("risk_score", 0.0),
+                           a.get("crawled_at", "")))
                 if c.rowcount > 0: count += 1
             except Exception as e:
                 logger.error(f"保存新闻失败: {e}")
@@ -92,12 +93,13 @@ class DatabaseManager:
         for w in warnings:
             try:
                 c.execute("INSERT OR IGNORE INTO disaster_warnings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (w["id"], w.get("source",""), w.get("region",""), w.get("title",""),
-                     w.get("url",""), w.get("date",""), w.get("alert_level","未知"),
-                     w.get("severity",99), w.get("disaster_type","未知"), w.get("risk_score",0.0),
-                     w.get("description",""), ""))
+                          (w["id"], w.get("source", ""), w.get("region", ""), w.get("title", ""),
+                           w.get("url", ""), w.get("date", ""), w.get("alert_level", "未知"),
+                           w.get("severity", 99), w.get("disaster_type", "未知"), w.get("risk_score", 0.0),
+                           w.get("description", ""), ""))
                 if c.rowcount > 0: count += 1
-            except: pass
+            except:
+                pass
         self.conn.commit()
         return count
 
@@ -106,11 +108,13 @@ class DatabaseManager:
         count = 0
         for item in items:
             try:
-                c.execute("INSERT OR IGNORE INTO market_data (title, url, category, date, content, crawled_at) VALUES (?,?,?,?,?,?)",
-                    (item.get("title",""), item.get("url",""), item.get("category",""),
-                     item.get("date",""), item.get("content",""), datetime.now().isoformat()))
+                c.execute(
+                    "INSERT OR IGNORE INTO market_data (title, url, category, date, content, crawled_at) VALUES (?,?,?,?,?,?)",
+                    (item.get("title", ""), item.get("url", ""), item.get("category", ""),
+                     item.get("date", ""), item.get("content", ""), datetime.now().isoformat()))
                 if c.rowcount > 0: count += 1
-            except: pass
+            except:
+                pass
         self.conn.commit()
         return count
 
@@ -279,12 +283,19 @@ class DatabaseManager:
     # ============================================================
     # 查询 & 统计 — 不变
     # ============================================================
-    def get_all_news(self, limit=100, offset=0, category=None):
+    # database.py 中修改 get_all_news 方法
+    def get_all_news(self, limit=None, offset=0, category=None):
         c = self.conn.cursor()
+        sql = "SELECT * FROM news_articles"
+        params = []
         if category:
-            c.execute("SELECT * FROM news_articles WHERE category=? ORDER BY date DESC LIMIT ? OFFSET ?", (category, limit, offset))
-        else:
-            c.execute("SELECT * FROM news_articles ORDER BY date DESC LIMIT ? OFFSET ?", (limit, offset))
+            sql += " WHERE category=?"
+            params.append(category)
+        sql += " ORDER BY date DESC"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+        c.execute(sql, params)
         return [dict(r) for r in c.fetchall()]
 
     def search_news(self, keyword, limit=50):
@@ -296,14 +307,15 @@ class DatabaseManager:
     def get_news_by_date_range(self, start_date, end_date, limit=200):
         c = self.conn.cursor()
         c.execute("SELECT * FROM news_articles WHERE date >= ? AND date <= ? ORDER BY date DESC LIMIT ?",
-            (start_date, end_date, limit))
+                  (start_date, end_date, limit))
         return [dict(r) for r in c.fetchall()]
 
     def get_news_by_keyword_and_date(self, keyword, start_date=None, end_date=None, limit=50):
         c = self.conn.cursor()
         like = f"%{keyword}%"
         if start_date and end_date:
-            c.execute("SELECT * FROM news_articles WHERE title LIKE ? AND date >= ? AND date <= ? ORDER BY date DESC LIMIT ?",
+            c.execute(
+                "SELECT * FROM news_articles WHERE title LIKE ? AND date >= ? AND date <= ? ORDER BY date DESC LIMIT ?",
                 (like, start_date, end_date, limit))
         else:
             c.execute("SELECT * FROM news_articles WHERE title LIKE ? ORDER BY date DESC LIMIT ?", (like, limit))
@@ -312,9 +324,12 @@ class DatabaseManager:
     def get_sentiment_summary(self, start_date=None, end_date=None):
         c = self.conn.cursor()
         if start_date and end_date:
-            c.execute("SELECT COUNT(*), AVG(sentiment_score), SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END), SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) FROM news_articles WHERE date >= ? AND date <= ?", (start_date, end_date))
+            c.execute(
+                "SELECT COUNT(*), AVG(sentiment_score), SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END), SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) FROM news_articles WHERE date >= ? AND date <= ?",
+                (start_date, end_date))
         else:
-            c.execute("SELECT COUNT(*), AVG(sentiment_score), SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END), SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) FROM news_articles")
+            c.execute(
+                "SELECT COUNT(*), AVG(sentiment_score), SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END), SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) FROM news_articles")
         row = c.fetchone()
         total = row[0] or 0
         avg = row[1] or 0.5
@@ -337,12 +352,13 @@ class DatabaseManager:
     def save_analysis(self, analysis_type, result):
         c = self.conn.cursor()
         c.execute("INSERT INTO analysis_results (analysis_type, result_json, created_at) VALUES (?,?,?)",
-            (analysis_type, json.dumps(result, ensure_ascii=False), datetime.now().isoformat()))
+                  (analysis_type, json.dumps(result, ensure_ascii=False), datetime.now().isoformat()))
         self.conn.commit()
 
     def get_recent_analysis(self, analysis_type, limit=1):
         c = self.conn.cursor()
-        c.execute("SELECT * FROM analysis_results WHERE analysis_type=? ORDER BY created_at DESC LIMIT ?", (analysis_type, limit))
+        c.execute("SELECT * FROM analysis_results WHERE analysis_type=? ORDER BY created_at DESC LIMIT ?",
+                  (analysis_type, limit))
         results = []
         for r in c.fetchall():
             d = dict(r)
@@ -352,12 +368,15 @@ class DatabaseManager:
 
     def get_statistics(self):
         c = self.conn.cursor()
-        c.execute("SELECT COUNT(*) FROM news_articles"); tn = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM disaster_warnings"); td = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM news_articles");
+        tn = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM disaster_warnings");
+        td = c.fetchone()[0]
         c.execute("SELECT category, COUNT(*) FROM news_articles GROUP BY category")
         cats = {r[0]: r[1] for r in c.fetchall()}
         # 模型分析覆盖统计
-        c.execute("SELECT COUNT(*) FROM article_model_results"); analyzed = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM article_model_results");
+        analyzed = c.fetchone()[0]
         return {"total_news": tn, "total_disasters": td, "category_counts": cats, "analyzed_articles": analyzed}
 
     def clear_demo_data(self):

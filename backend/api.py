@@ -608,9 +608,7 @@ def _save_model_results_batch(db, articles):
 
 
 def run_analysis_on_existing(db):
-    """对 DB 中**未分析**的新闻运行 NLP 分析。
-    已分析过的新闻跳过，避免重复计算。
-    """
+    """仅对未分析的文章执行 NLP 分析，不生成聚合分析"""
     from nlp import HotTopicAnalyzer
 
     unanalyzed_ids = db.get_unanalyzed_article_ids(limit=5000)
@@ -618,7 +616,6 @@ def run_analysis_on_existing(db):
         logger.info("[ANALYSIS] 所有新闻均已分析，跳过")
         return
 
-    # 根据 ID 列表获取完整文章
     placeholders = ",".join("?" for _ in unanalyzed_ids)
     c = db.conn.cursor()
     c.execute(
@@ -630,12 +627,9 @@ def run_analysis_on_existing(db):
         logger.info("[ANALYSIS] 未找到需要分析的文章")
         return
 
-    logger.info(f"[ANALYSIS] 待分析: {len(arts)} 条（共 {len(unanalyzed_ids)} 条未分析）")
-
-    clf, sa, ha = _get_nlp_modules()
+    logger.info(f"[ANALYSIS] 待分析旧文章: {len(arts)} 条")
+    clf, sa, _ = _get_nlp_modules()
     _classify_and_sentiment_batch(arts, clf, sa)
-
-    # 保存每条新闻的模型结果
     _save_model_results_batch(db, arts)
 
     # 更新 news_articles 表中的分类/情感字段
@@ -645,29 +639,28 @@ def run_analysis_on_existing(db):
             (a["category"], a["sentiment"], a["sentiment_score"], a["risk_score"], a["id"]),
         )
     db.conn.commit()
+    logger.info(f"[ANALYSIS] 已分析 {len(arts)} 条旧文章")
 
-    # 趋势 + 热词 + 全量分析
-    all_arts = db.get_all_news(500)
+def refresh_aggregate_analysis(db):
+    """基于所有文章重新生成聚合分析（趋势、热词、全量分析）"""
+    from nlp import HotTopicAnalyzer
+    all_arts = db.get_all_news()  # 获取全部文章
+    if not all_arts:
+        logger.info("[ANALYSIS] 无文章，跳过聚合分析生成")
+        return
+    ha = HotTopicAnalyzer()
     trend_data = ha.trend_over_time(all_arts)
     db.save_analysis("full_analysis", ha.full_analysis(all_arts))
     db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords(
         [a.get("title", "") for a in all_arts if a.get("title")], 30)})
     db.save_analysis("trend", {"trend": trend_data})
-
-    # 导出 JSON 快照
     json_path = db.export_model_results_json()
-    logger.info(f"[ANALYSIS] 已完成 {len(arts)} 条, JSON → {json_path}")
+    logger.info(f"[ANALYSIS] 聚合分析已更新，JSON → {json_path}")
 
-
-def run_crawl_pipeline(db):
-    """执行完整的爬取+NLP+分析流水线（增量追加，不清除旧数据）。
-    仅对新爬取的文章做分析；已分析文章不重复计算。
-    返回本次爬取到的文章数量。
-    """
-    from nlp import HotTopicAnalyzer
+def run_crawl_pipeline(db, start_date=None, end_date=None):
+    """执行爬取+分析新文章，支持按日期过滤"""
     from crawler.news_crawler import AgriculturalNewsCrawler
 
-    # 查询已有文章ID，传给爬虫实现增量跳过
     existing = db.conn.execute("SELECT id FROM news_articles").fetchall()
     known_ids = set(r[0] for r in existing) if existing else set()
     logger.info(f"[CRAWL] 已知 {len(known_ids)} 篇文章，增量模式跳过重复")
@@ -679,49 +672,56 @@ def run_crawl_pipeline(db):
         logger.info("[CRAWL] 未爬取到新文章")
         return 0
 
-    clf, sa, ha = _get_nlp_modules()
+    # ----- 日期过滤 -----
+    if start_date and end_date:
+        # 日期格式统一为 YYYY-MM-DD，确保比较准确
+        filtered = []
+        for a in all_a:
+            date_str = a.get("date", "")
+            if date_str and len(date_str) >= 10:
+                date_str = date_str[:10]  # 只取日期部分
+                if start_date <= date_str <= end_date:
+                    filtered.append(a)
+        all_a = filtered
+        logger.info(f"[CRAWL] 日期过滤后保留 {len(all_a)} 条 ({start_date} ~ {end_date})")
+        if not all_a:
+            logger.info("[CRAWL] 过滤后无新文章")
+            return 0
+
+    # ----- 后续分析、保存 -----
+    clf, sa, _ = _get_nlp_modules()
     _classify_and_sentiment_batch(all_a, clf, sa)
 
-    # INSERT OR IGNORE 实现增量追加
     saved = db.save_news(all_a)
-
     # 仅对新保存的文章存储模型结果
     saved_ids = {a["id"] for a in all_a}
     new_articles = [a for a in all_a if a["id"] in saved_ids] if saved != len(all_a) else all_a
     if new_articles:
         _save_model_results_batch(db, new_articles)
 
-    arts = db.get_all_news(500)
-    logger.info(f"[CRAWL] 爬取 {len(all_a)} 条, 新增保存 {saved} 条, DB中累计 {len(arts)} 条")
-
-    # 检查日期分布
-    dates_found = sorted(set(a.get("date", "")[:10] for a in arts if a.get("date", "")))
-    logger.info(f"[CRAWL] 日期分布: {dates_found}")
-    cats_found = {}
-    for a in arts:
-        c = a.get("category", "")
-        cats_found[c] = cats_found.get(c, 0) + 1
-    logger.info(f"[CRAWL] 类别分布: {cats_found}")
-
-    # 重新做趋势分析
-    trend_data = ha.trend_over_time(arts)
-    db.save_analysis("full_analysis", ha.full_analysis(arts))
-    db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords([a.get("title", "") for a in arts], 30)})
-    db.save_analysis("trend", {"trend": trend_data})
-
-    # 导出 JSON
-    json_path = db.export_model_results_json()
-    logger.info(f"[CRAWL] JSON 结果 → {json_path}")
-
+    logger.info(f"[CRAWL] 爬取 {len(all_a)} 条, 新增保存 {saved} 条")
     return len(all_a)
 
 
+
 async def handle_crawl(request):
-    """Manual crawl trigger - 增量追加模式，不清除已有数据"""
-    count = run_crawl_pipeline(get_db())
-    stats = get_db().get_statistics()
+    """手动爬取触发器 - 支持日期范围过滤"""
+    db = get_db()
+    start_date = request.query.get("start_date")
+    end_date = request.query.get("end_date")
+
+    # 1. 爬取新文章并分析（按日期过滤）
+    new_count = run_crawl_pipeline(db, start_date=start_date, end_date=end_date)
+
+    # 2. 补分析所有未分析的旧文章（不限日期）
+    run_analysis_on_existing(db)
+
+    # 3. 重新生成聚合分析（基于全部文章）
+    refresh_aggregate_analysis(db)
+
+    stats = db.get_statistics()
     return json_resp({
-        "crawled": count,
+        "crawled": new_count,
         "total": stats["total_news"],
         "analyzed": stats.get("analyzed_articles", 0),
     })
