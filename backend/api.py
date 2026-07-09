@@ -246,6 +246,29 @@ def _fetch_moa_api(commodity):
     return None
 
 
+def _normalize_price(raw_value):
+    """将 MOA API 原始价格归一化为 元/公斤，过滤异常值。
+
+    MOA API 对不同品种返回不同单位（元/吨 或 元/公斤），通过阈值判断：
+    - raw > 100  → 视为 元/吨，除以 1000
+    - raw <= 100 → 视为 元/公斤，直接使用
+    - 归一化后不在 (0, 500) 范围的视为 API 占位符（如 999999），返回 None
+    """
+    try:
+        v = float(raw_value or 0)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    # 大于 100 的视为元/吨，转换为元/公斤
+    if v > 100:
+        v = v / 1000.0
+    # 过滤 API 占位符（如 999999 → 999.999，仍 > 500）
+    if v <= 0 or v >= 500:
+        return None
+    return v
+
+
 def _build_response(moa_data, commodity):
     """将MOA API响应数据组装为前端需要的格式"""
     now = datetime.now()
@@ -260,15 +283,17 @@ def _build_response(moa_data, commodity):
         if not isinstance(item, dict): continue
         market_name = item.get("MARKET_NAME", "") or item.get("market", "")
         province_name = item.get("PROVINCE_NAME", "") or item.get("province", "")
-        price = float(item.get("PRICE_MARKET", 0) or item.get("price", 0))
-        prev_price = float(item.get("NEXT_PRICE_MARKET", 0) or item.get("prev", 0) or 0)
+        price = _normalize_price(item.get("PRICE_MARKET", 0) or item.get("price", 0))
+        prev_price = _normalize_price(item.get("NEXT_PRICE_MARKET", 0) or item.get("prev", 0) or 0)
         report_time = item.get("REPORT_TIME", "") or item.get("date", "")
+        if prev_price is None:
+            prev_price = price
         if not market_name and province_name: market_name = province_name
-        if market_name and price > 0:
+        if market_name and price is not None:
             wholesale.append({"market": market_name, "price": round(price, 2),
                 "prev": round(prev_price, 2) if prev_price else price,
                 "province": province_name, "date": report_time})
-        if province_name and price > 0:
+        if province_name and price is not None:
             province_map.setdefault(province_name, []).append(price)
     provinces = []
     for prov, prices in province_map.items():
@@ -287,11 +312,10 @@ def _build_response(moa_data, commodity):
                     date_str = str(d).replace("年","-").replace("月","-").replace("日","")
                     if not date_str: continue
                     for sc in sub_codes:
-                        p = float(item.get(f"C_{sc}", 0) or 0)
-                        if p > 0:
-                            unit_p = p / 1000 if p > 100 else p
+                        p = _normalize_price(item.get(f"C_{sc}", 0) or 0)
+                        if p is not None:
                             name = COTTON_SUB_NAMES.get(sc, sc)
-                            trend_series.setdefault(name, []).append({"date": date_str, "price": round(unit_p, 2)})
+                            trend_series.setdefault(name, []).append({"date": date_str, "price": round(p, 2)})
             date_map = {}
             for name, pts in trend_series.items():
                 for pt in pts: date_map.setdefault(pt["date"], []).append(pt["price"])
@@ -304,10 +328,10 @@ def _build_response(moa_data, commodity):
             for item in m3_list:
                 if isinstance(item, dict):
                     d = item.get("REPORT_TIME", "") or item.get("date", "") or ""
-                    p = float(item.get(price_key, 0) or 0)
-                    if d and p > 0:
+                    p = _normalize_price(item.get(price_key, 0) or 0)
+                    if d and p is not None:
                         date_str = str(d).replace("年","-").replace("月","-").replace("日","")
-                        trend.append({"date": date_str, "price": round(p / 1000 if p > 100 else p, 2)})
+                        trend.append({"date": date_str, "price": round(p, 2)})
             if len(trend) > 30: trend = trend[-30:]
     # 兜底趋势
     if not trend:
@@ -315,8 +339,8 @@ def _build_response(moa_data, commodity):
             for item in (src if isinstance(src, list) else []):
                 if isinstance(item, dict):
                     d = item.get("REPORT_TIME") or item.get("date") or ""
-                    p = float(item.get("PRICE_MARKET", 0) or item.get("price", 0))
-                    if d and p > 0: trend.append({"date": str(d), "price": round(p, 2)})
+                    p = _normalize_price(item.get("PRICE_MARKET", 0) or item.get("price", 0))
+                    if d and p is not None: trend.append({"date": str(d), "price": round(p, 2)})
     if not trend and wholesale:
         date_map = {}
         for w in wholesale:

@@ -690,6 +690,29 @@ function renderPriceData(data) {
     drawWholesaleRanking(data.market_rank || data.wholesale, data.trend_series);
 }
 
+function _calcYAxisRange(dataArrays) {
+    // 从一组数据数组中计算合适的纵轴范围（自动过滤异常值 + 加 padding）
+    var allPrices = [];
+    dataArrays.forEach(function(arr) {
+        if (!arr || !arr.length) return;
+        arr.forEach(function(v) {
+            // 过滤异常值：null、NaN、以及 > 500 的 API 占位符（如 999999）
+            if (v != null && !isNaN(v) && v > 0 && v < 500) allPrices.push(v);
+        });
+    });
+    if (!allPrices.length) return {};
+    var min = Math.min.apply(null, allPrices);
+    var max = Math.max.apply(null, allPrices);
+    var range = max - min;
+    if (range <= 0) return { min: min - 0.05, max: max + 0.05 };
+    // 按数据跨度的 15% 加 padding，最小不低于 0.02
+    var padding = Math.max(range * 0.15, 0.02);
+    return {
+        min: Math.max(0, min - padding),
+        max: max + padding
+    };
+}
+
 function drawPriceTrend(td, trend_series) {
     var el = byId("priceTrendChart"); if (!el) return;
     if (priceChart) { priceChart.dispose(); priceChart = null; }
@@ -705,6 +728,7 @@ function drawPriceTrend(td, trend_series) {
         var dateSet = {};
         var series = [];
         var seriesNames = Object.keys(trend_series);
+        var allDataForRange = [];
         seriesNames.forEach(function(name) {
             var pts = trend_series[name];
             pts.forEach(function(p) { if (!dateSet[p.date]) { dateSet[p.date] = true; allDates.push(p.date); } });
@@ -715,22 +739,29 @@ function drawPriceTrend(td, trend_series) {
             var dataMap = {};
             pts.forEach(function(p) { dataMap[p.date] = p.price; });
             var seriesData = allDates.map(function(d) { return dataMap[d] || null; });
+            allDataForRange.push(seriesData);
             series.push({ name: name, type: "line", smooth: true, data: seriesData,
+                connectNulls: true,
                 lineStyle: { width: 2 }, itemStyle: { color: colors[idx % colors.length] },
                 areaStyle: { opacity: 0.1 }, symbol: "circle", symbolSize: 4 });
         });
+        var yRange = _calcYAxisRange(allDataForRange);
         option = { tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
             legend: { data: seriesNames, bottom: 0 },
             grid: { left: 50, right: 20, top: 20, bottom: 55 },
             xAxis: { type: "category", data: allDates, axisLabel: { fontSize: 11 } },
-            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 } },
+            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 },
+                min: yRange.min, max: yRange.max },
             series: series };
     } else {
+        var priceData = td.map(function(d) { return d.price; });
+        var yRange2 = _calcYAxisRange([priceData]);
         option = { tooltip: { trigger: "axis", formatter: function(p) { return p[0].axisValue + "<br/>价格: " + p[0].value + " 元/公斤"; } },
             grid: { left: 50, right: 20, top: 20, bottom: 30 },
             xAxis: { type: "category", data: td.map(function(d) { return d.date; }), axisLabel: { fontSize: 11 } },
-            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 } },
-            series: [{ type: "line", smooth: true, data: td.map(function(d) { return d.price; }),
+            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 },
+                min: yRange2.min, max: yRange2.max },
+            series: [{ type: "line", smooth: true, data: priceData,
                 lineStyle: { width: 2, color: "#2e86c1" }, areaStyle: { color: "rgba(46,134,193,0.1)" },
                 itemStyle: { color: "#2e86c1" },
                 markLine: { data: [{ type: "average", name: "均价" }], label: { fontSize: 11 } } }] };
