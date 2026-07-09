@@ -267,6 +267,25 @@ class DatabaseManager:
         c.execute("SELECT * FROM disaster_warnings ORDER BY severity ASC LIMIT ?", (limit,))
         return [dict(r) for r in c.fetchall()]
 
+    def get_already_extracted_disaster_ids(self, article_ids: list[str]) -> set[str]:
+        """从给定文章 ID 列表中，返回已有 AI 提取结果的 ID。
+
+        判断标准：disaster_warnings 中 severity != 99。
+        - severity 1-4: AI 提取到了具体灾害信息
+        - severity 0:   AI 已尝试但未发现灾害信息
+        - severity 99:  尚未经 AI 处理（sync 初始值）
+        """
+        if not article_ids:
+            return set()
+        placeholders = ",".join("?" for _ in article_ids)
+        c = self.conn.cursor()
+        c.execute(f"""
+            SELECT id FROM disaster_warnings
+            WHERE id IN ({placeholders})
+              AND severity != 99
+        """, article_ids)
+        return {r[0] for r in c.fetchall()}
+
     def save_analysis(self, analysis_type, result):
         c = self.conn.cursor()
         c.execute("INSERT INTO analysis_results (analysis_type, result_json, created_at) VALUES (?,?,?)",

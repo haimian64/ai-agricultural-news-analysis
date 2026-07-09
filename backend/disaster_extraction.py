@@ -200,10 +200,10 @@ def _update_disaster_record(db, article_id: str, extracted: dict):
 
 
 def _safe_int(value, default=99):
-    """安全转换为 int，失败时返回默认值。"""
+    """安全转换为 int，失败时返回默认值。0 表示 AI 已尝试但未发现灾害。"""
     try:
         v = int(value)
-        if v in (1, 2, 3, 4, 99):
+        if v in (0, 1, 2, 3, 4, 99):
             return v
         return default
     except (TypeError, ValueError):
@@ -303,21 +303,47 @@ def extract_disaster_info_from_ai(db, force=False) -> dict:
         db.conn.commit()
         logger.info(f"[DisasterExtraction] 抓取正文 {fetched} 篇")
 
-    # Step 3: 加载模型并批量提取
+    # Step 2.5: 过滤已提取的文章，避免重复 AI 推理
+    all_ids = [a["id"] for a in articles]
+    already_extracted = db.get_already_extracted_disaster_ids(all_ids)
+    unextracted = [a for a in articles if a["id"] not in already_extracted]
+    skipped = len(articles) - len(unextracted)
+
+    if skipped > 0:
+        logger.info(
+            f"[DisasterExtraction] 时间窗口内 {len(articles)} 条灾害新闻，"
+            f"已提取 {skipped} 条，待分析 {len(unextracted)} 条"
+        )
+
+    if not unextracted:
+        logger.info("[DisasterExtraction] 所有窗口内灾害新闻均已提取，跳过 AI 推理")
+        return {
+            "input_count": len(articles),
+            "extracted_count": 0,
+            "skipped_count": skipped,
+            "fetched_content": fetched,
+        }
+
+    # Step 3: 加载模型并批量提取（仅对未提取的文章）
     try:
         from backend.chatbot import _ensure_model_loaded
 
         model, tokenizer = _ensure_model_loaded()
     except Exception as e:
         logger.error(f"[DisasterExtraction] 模型加载失败: {e}")
-        return {"input_count": len(articles), "extracted_count": 0, "fetched_content": fetched}
+        return {
+            "input_count": len(articles),
+            "extracted_count": 0,
+            "skipped_count": skipped,
+            "fetched_content": fetched,
+        }
 
     BATCH_SIZE = 8  # 正文模式每批 8 条，避免输出截断
     today_str = datetime.now().strftime("%Y年%m月%d日")
     total_extracted = 0
 
-    for i in range(0, len(articles), BATCH_SIZE):
-        batch = articles[i : i + BATCH_SIZE]
+    for i in range(0, len(unextracted), BATCH_SIZE):
+        batch = unextracted[i : i + BATCH_SIZE]
         messages = _build_extraction_messages(batch, today_str)
 
         try:
@@ -344,13 +370,15 @@ def extract_disaster_info_from_ai(db, force=False) -> dict:
                 for k in ("occurrence_time", "region", "disaster_type", "suggestions")
             )
 
-            # Step 4: 更新数据库
-            if has_info or force:
-                try:
-                    _update_disaster_record(db, aid, item)
-                    total_extracted += 1
-                except Exception as e:
-                    logger.error(f"[DisasterExtraction] 更新 {aid} 失败: {e}")
+            # Step 4: 更新数据库（即使未提取到信息也写入，标记为已尝试）
+            try:
+                if not has_info and not force:
+                    # 无灾害信息：标记 severity=0 表示"AI 已尝试，未发现灾害"
+                    item["severity"] = 0
+                _update_disaster_record(db, aid, item)
+                total_extracted += 1
+            except Exception as e:
+                logger.error(f"[DisasterExtraction] 更新 {aid} 失败: {e}")
 
         logger.info(
             f"[DisasterExtraction] 批次 {i // BATCH_SIZE + 1}: "
@@ -362,11 +390,12 @@ def extract_disaster_info_from_ai(db, force=False) -> dict:
 
     logger.info(
         f"[DisasterExtraction] 完成: {len(articles)} 条输入, "
-        f"{total_extracted} 条已更新到数据库"
+        f"已跳过 {skipped} 条, {total_extracted} 条已更新到数据库"
     )
 
     return {
         "input_count": len(articles),
         "extracted_count": total_extracted,
+        "skipped_count": skipped,
         "fetched_content": fetched,
     }

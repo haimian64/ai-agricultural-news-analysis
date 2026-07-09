@@ -1167,69 +1167,122 @@ async def _proxy_websocket(request, target_url):
 def sync_disaster_and_market_from_news(db):
     """
     从 news_articles 中提取灾害预警和市场行情，同步到专用表。
-    清空旧数据，完全基于分类结果重建。
+
+    灾害预警：增量 upsert，已存在的记录保留 AI 提取字段（region/alert_level/
+    severity/disaster_type/description），仅更新基础字段。新记录插入时 AI 字段留空，
+    由 extract_disaster_info_from_ai 后续填充。
+
+    市场行情：清空重建（无 AI 提取字段需要保留）。
     """
     logger.info("[SYNC] 开始同步灾害预警和市场数据...")
 
-    # 清空旧数据
-    db.conn.execute("DELETE FROM disaster_warnings")
-    db.conn.execute("DELETE FROM market_data")
-    db.conn.commit()
-
-    # 1. 灾害预警 (category = "灾害预警")
+    # ============================================================
+    # 1. 灾害预警 — 增量 upsert
+    # ============================================================
     disasters = db.get_all_news(category="灾害预警")
+    disaster_ids = {d["id"] for d in disasters}
+
+    # 1a. 读取已存在记录中的 AI 字段，用于后续保留
+    existing_ai = {}
+    c = db.conn.cursor()
+    c.execute("SELECT id, region, alert_level, severity, disaster_type, description FROM disaster_warnings")
+    for row in c.fetchall():
+        existing_ai[row[0]] = {
+            "region": row[1] or "",
+            "alert_level": row[2] or "",
+            "severity": row[3] if row[3] is not None else 99,
+            "disaster_type": row[4] or "",
+            "description": row[5] or "",
+        }
+
+    # 1b. 删除孤儿记录：id 不再属于灾害预警分类的文章
+    if disaster_ids:
+        placeholders = ",".join("?" for _ in disaster_ids)
+        db.conn.execute(
+            f"DELETE FROM disaster_warnings WHERE id NOT IN ({placeholders})",
+            list(disaster_ids),
+        )
+    else:
+        db.conn.execute("DELETE FROM disaster_warnings")
+
+    # 1c. Upsert 每条灾害新闻
     inserted_disasters = 0
+    updated_disasters = 0
     for news in disasters:
-        try:
-            # 从 news 字段映射
-            # 注意：news 中可能没有 region, alert_level, severity, disaster_type 等字段，留空
-            db.conn.execute("""
-                INSERT INTO disaster_warnings (
+        aid = news["id"]
+        if aid in existing_ai:
+            # 已存在：保留 AI 字段，更新基础字段
+            db.conn.execute(
+                """UPDATE disaster_warnings
+                   SET source=?, title=?, url=?, date=?, risk_score=?, crawled_at=?
+                   WHERE id=?""",
+                (
+                    news.get("source", ""),
+                    news.get("title", ""),
+                    news.get("url", ""),
+                    news.get("date", ""),
+                    news.get("risk_score", 0.0),
+                    news.get("crawled_at", ""),
+                    aid,
+                ),
+            )
+            updated_disasters += 1
+        else:
+            # 新记录：AI 字段留空，后续由 extract_disaster_info_from_ai 填充
+            db.conn.execute(
+                """INSERT INTO disaster_warnings (
                     id, source, region, title, url, date,
                     alert_level, severity, disaster_type, risk_score, description, crawled_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                news["id"],
-                news.get("source", ""),
-                "",  # region 暂空
-                news.get("title", ""),
-                news.get("url", ""),
-                news.get("date", ""),
-                "",  # alert_level 暂空
-                99,  # severity 默认 99（未知）
-                "",  # disaster_type 暂空
-                news.get("risk_score", 0.0),
-                news.get("content", "")[:500],  # description
-                news.get("crawled_at", "")
-            ))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    aid,
+                    news.get("source", ""),
+                    "",  # region — 待 AI 提取
+                    news.get("title", ""),
+                    news.get("url", ""),
+                    news.get("date", ""),
+                    "",  # alert_level — 待 AI 提取
+                    99,  # severity — 待 AI 提取
+                    "",  # disaster_type — 待 AI 提取
+                    news.get("risk_score", 0.0),
+                    news.get("content", "")[:500],  # description — 后续由 AI 建议覆盖
+                    news.get("crawled_at", ""),
+                ),
+            )
             inserted_disasters += 1
-        except Exception as e:
-            logger.error(f"插入灾害预警失败 ({news.get('id')}): {e}")
 
-    # 2. 市场行情 (category = "市场行情")
+    # ============================================================
+    # 2. 市场行情 — 清空重建（无 AI 提取字段需要保留）
+    # ============================================================
+    db.conn.execute("DELETE FROM market_data")
+
     markets = db.get_all_news(category="市场行情")
     inserted_markets = 0
     for news in markets:
         try:
-            db.conn.execute("""
-                INSERT INTO market_data (
+            db.conn.execute(
+                """INSERT INTO market_data (
                     title, url, source, category, date, content, crawled_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                news.get("title", ""),
-                news.get("url", ""),
-                news.get("source", ""),
-                news.get("category", ""),
-                news.get("date", ""),
-                news.get("content", ""),
-                news.get("crawled_at", "")
-            ))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    news.get("title", ""),
+                    news.get("url", ""),
+                    news.get("source", ""),
+                    news.get("category", ""),
+                    news.get("date", ""),
+                    news.get("content", ""),
+                    news.get("crawled_at", ""),
+                ),
+            )
             inserted_markets += 1
         except Exception as e:
             logger.error(f"插入市场数据失败 ({news.get('id')}): {e}")
 
     db.conn.commit()
-    logger.info(f"[SYNC] 同步完成：灾害预警 {inserted_disasters} 条，市场数据 {inserted_markets} 条")
+    logger.info(
+        f"[SYNC] 同步完成：灾害预警 新增 {inserted_disasters} / 保留 {updated_disasters}，"
+        f"市场数据 {inserted_markets} 条"
+    )
 
 
 def create_app():

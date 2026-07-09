@@ -195,9 +195,9 @@ python tests/test_nlp.py
 ## 重要说明
 
 - **增量爬取**：每次调用 `/api/crawl` 均为增量模式，根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。支持通过前端日期选择器过滤爬取范围。分页爬取时连续 3 页无新文章则提前终止。
-- **五步爬取流程**：爬取新文章 → 补分析未分析旧文章 → 生成聚合分析 → 同步灾害/市场数据 → AI 灾害信息提取。**步骤顺序不可变更**：第 4 步会清空并重建 `disaster_warnings` 和 `market_data` 表，第 5 步用 Qwen 模型重新填充 AI 提取的结构化字段（地区、预警等级、灾害类型等）。如果 `DISASTER_EXTRACTION_ENABLED = False`，每次爬取后灾害预警的结构化字段将为空。
-- **AI 灾害提取**：从分类为「灾害预警」的新闻中按需抓取正文，使用 Qwen2.5-3B-Instruct 自动提取发生时间、地点、灾害类型、严重程度和防灾建议，写入 `disaster_warnings` 表。仅处理时间窗口内的文章，正文抓取后持久保存到 `news_articles.content`，避免重复请求。
-- **Qwen 模型共享**：聊天助手（`chatbot.py`）和灾害提取（`disaster_extraction.py`）共享同一个 Qwen 模型实例（~5.8 GB 显存），通过 `chatbot.py` 的模块级 `_model_cache` 字典实现。模型首次使用时懒加载，两个模块不会重复占用显存。
+- **五步爬取流程**：爬取新文章 → 补分析未分析旧文章 → 生成聚合分析 → 同步灾害/市场数据 → AI 灾害信息提取。第 4 步对 `disaster_warnings` 使用 **增量 upsert**（已存在的记录保留 AI 提取字段，仅新增/删除的记录会被插入/清理），`market_data` 仍为清空重建（无 AI 字段需保留）。第 5 步对窗口内**尚未分析**的文章（`severity = 99`）执行 AI 提取，已分析的文章跳过。
+- **AI 灾害提取（增量）**：从分类为「灾害预警」的新闻中按需抓取正文，使用 Qwen2.5-3B-Instruct 自动提取发生时间、地点、灾害类型、严重程度和防灾建议。仅处理 `DISASTER_NEWS_WINDOW_DAYS` 时间窗口内的文章，且通过 `severity` 字段判断是否已分析（`!= 99` 则跳过），避免重复推理。提取到有效信息时 `severity` 设为 1-4（对应红/橙/黄/蓝预警等级），无灾害信息时设为 0（已尝试标记）。正文抓取后持久保存到 `news_articles.content`。
+- **Qwen 模型共享与加载时机**：聊天助手（`chatbot.py`）和灾害提取（`disaster_extraction.py`）共享同一个 Qwen 模型实例（~5.8 GB 显存），通过 `chatbot.py` 的模块级 `_model_cache` 字典实现懒加载。模型在以下时机之一首次加载：① 用户发送第一条聊天消息；② 启动或爬取时窗口内存在未分析的灾害文章。如果窗口内文章均已分析，启动时**不会加载 Qwen**，启动耗时 < 1 秒。加载后常驻内存直到进程退出，`unload_chatbot_model()` 可手动释放。
 - **正文按需抓取**：爬虫阶段仅保存标题（content = title），NLP 分类/情感分析基于标题进行。正文抓取仅在 AI 灾害提取时按需触发（仅针对「灾害预警」类文章），抓取后回写到 `news_articles.content`。
 - **启动行为**：`main.py` 启动后立即展示最近一次的分析结果，不在启动时自动爬取。点击仪表盘「爬取实时新闻」按钮触发完整五步流程。
 - **纯数据库存储**：所有数据读写均通过 SQLite，不产生 JSON 中间文件。`analysis_results` 表在每次启动时被清空并由 `refresh_aggregate_analysis()` 重建。
@@ -240,7 +240,8 @@ pip install transformers torch
 **技术细节：**
 
 - NLP 模型（BERT + mDeBERTa）采用**懒加载单例**：首次调用才加载到 GPU 显存，不影响启动速度
-- Qwen 模型同样懒加载，且由 `chatbot.py` 和 `disaster_extraction.py` **共享同一实例**（通过 `_ensure_model_loaded()` 导入），不重复占显存（~5.8 GB）
+- Qwen 模型同样懒加载，且由 `chatbot.py` 和 `disaster_extraction.py` **共享同一实例**（通过 `_ensure_model_loaded()` 导入），不重复占显存（~5.8 GB）。启动时如果窗口内灾害文章均已分析，则**不加载模型**。
+- 灾害提取支持**增量模式**：通过 `severity` 字段判断文章是否已分析，跳过已处理的文章，仅对新增/未分析的文章执行推理
 - 情感分析支持 **GPU 批量推理**（batch_size=64）
 - 风险评分保留**规则匹配**（灾害术语几乎无歧义，关键词匹配比模型更可靠）
 - NLP 模型加载失败时自动回退规则引擎，不影响服务可用性
