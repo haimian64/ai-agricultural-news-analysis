@@ -1,6 +1,6 @@
 """API路由 - 添加搜索/日期筛选/情感摘要/市场数据端点"""
-import asyncio, json, logging
-from datetime import datetime
+import asyncio, json, logging, random, math, urllib.request
+from datetime import datetime, timedelta, date
 import aiohttp
 from aiohttp import web
 from config import config
@@ -18,11 +18,7 @@ def get_db():
     global _db_manager
     if _db_manager is None:
         from backend.database import DatabaseManager
-        import urllib.request, json, random, math, re, traceback
-        from datetime import timedelta, date
-        from urllib.parse import urljoin
-        from lxml import html as lxml_html
-        _db_manager = DatabaseManager();
+        _db_manager = DatabaseManager()
         _db_manager.conn
     return _db_manager
 
@@ -777,7 +773,6 @@ CITY_COORDS = {
 
 async def handle_weather(request):
     """Weather API using Open-Meteo"""
-    import urllib.request, json
     city = request.query.get("city", "")
     coords = CITY_COORDS.get(city)
     if not coords:
