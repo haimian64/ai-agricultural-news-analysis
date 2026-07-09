@@ -4,13 +4,8 @@ aiohttp>=3.9.0
 lxml>=4.9.0
 cssselect>=1.2.0
 jieba>=0.42.0
+gradio>=4.0.0
 
-# 可选依赖（无网络环境也可运行，只是降级为规则模式）
-# transformers>=4.30.0  # BERT/T5模型（设置 MODEL_MODE=local 时使用）
-# torch>=2.0.0          # PyTorch（同上）
-
-# 数据分析（可视化生成用，不影响核心功能）
-matplotlib>=3.7.0
-pandas>=2.0.0
-wordcloud>=1.9.0
-scikit-learn>=1.3.0
+# GPU 深度学习（仅 MODEL_MODE="local" 时需要，模型文件需另外下载放入 models/）
+# transformers>=4.30.0
+# torch>=2.0.0
