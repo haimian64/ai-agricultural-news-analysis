@@ -167,7 +167,8 @@
             series: [{
                 type: "bar", data: lbls.map(function (l) {
                     return {value: counts[l], itemStyle: {color: clr[l] || "#95a5a6", borderRadius: [4, 4, 0, 0]}};
-                }), barWidth: 50
+                }), barWidth: 50,
+                label: {show: true, position: "top", fontSize: 13, fontWeight: "bold", color: "#333"}
             }]
         });
         charts.sentiment = ct;
@@ -191,9 +192,24 @@
         chart.setOption({
             tooltip: {trigger: "axis"},
             legend: {data: cl, bottom: 0, textStyle: {fontSize: 11}},
-            grid: {left: 50, right: 20, bottom: 50, top: 20},
+            grid: {left: 50, right: 20, bottom: 65, top: 20},
             xAxis: {type: "category", data: dates, axisLabel: {fontSize: 11}},
             yAxis: {type: "value", minInterval: 1},
+            dataZoom: [{
+                type: "slider",
+                start: 0,
+                end: 100,
+                height: 25,
+                bottom: 25,
+                handleSize: "80%",
+                textStyle: {fontSize: 10}
+            }, {
+                type: "inside",
+                start: 0,
+                end: 100,
+                zoomOnMouseWheel: true,
+                moveOnMouseMove: true
+            }],
             series: cl.map(function (c, i) {
                 return {
                     name: c, type: "line", smooth: true,
