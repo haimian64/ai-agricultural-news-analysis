@@ -8,10 +8,13 @@ build/
 env/
 venv/
 .DS_Store
+
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+!agricultural_news.db
+
 data/raw/news/*.json
 CLAUDE.md
 .idea/

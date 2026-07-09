@@ -12,9 +12,10 @@ Agricultural News Analysis & Early Warning System
 - **AI 灾害信息提取** — 使用 Qwen2.5-3B-Instruct 从灾害新闻正文中自动提取：发生时间、地点、灾害类型、严重程度、防灾建议，并写入数据库
 - **热点提取** — 基于 TF 的关键词提取，支持词云展示
 - **趋势分析** — 按时间维度统计各类别新闻分布与情感变化
-- **可视化仪表盘** — ECharts 驱动的交互式数据大屏，含饼图、柱状图、折线图、词云
+- **可视化仪表盘** — ECharts 驱动的交互式数据大屏，含饼图、柱状图、折线图、词云，内置浮动聊天助手
 - **天气预报集成** — 接入 Open-Meteo 免费 API，无需注册即可获取全国 ~350+ 城市天气预报
-- **AI 聊天助手** — Gradio 驱动的 Qwen2.5-3B-Instruct 对话助手，支持工具调用（查询统计、搜索新闻、查看灾害等）
+- **AI 聊天助手** — Gradio 驱动的 Qwen2.5-3B-Instruct 对话助手，支持工具调用（查询统计、搜索新闻、查看灾害、天气查询等），通过悬浮按钮在仪表盘上直接使用
+- **农产品价格查询** — 实时爬取农业农村部批发市场价格，支持涨跌排行、全国价格走势、分省对比
 
 ## 技术栈
 
@@ -57,7 +58,7 @@ pip install -r requirements.txt
 pip install transformers torch
 ```
 
-> 模型文件需另外下载放入 `models/` 目录，详见下方「NLP 模式」章节。如不需要聊天助手，可在 `config.py` 中设置 `CHATBOT_ENABLED = False` 并跳过 `gradio` 安装。
+> 模型文件需另外下载放入 `models/` 目录，详见下方「NLP 模式」章节。如不需要聊天助手，可在 `config.py` 中设置 `CHATBOT_ENABLED = False`（gradio 仍会被安装但不影响运行）。
 
 **第二步：启动服务**
 
@@ -77,40 +78,44 @@ agricultural-news-analysis/
 ├── start.bat                        # Windows 启动脚本（激活 venv + 启动服务，不含安装依赖）
 │
 ├── crawler/                         # 爬虫模块
-│   ├── sources.py                   # 新闻源定义（12 个源）
+│   ├── sources.py                   # 新闻源定义（12 个源，覆盖 5 个机构）
 │   └── news_crawler.py              # 新闻爬取器 + 正文提取
 │
 ├── nlp/                             # NLP 分析模块
-│   ├── classifier.py                # 规则新闻分类器
+│   ├── classifier.py                # 规则新闻分类器（6 分类关键词词典）
 │   ├── sentiment.py                 # 规则情感分析与风险评分
-│   ├── analyzer.py                  # 热点话题与趋势分析
-│   ├── preprocessor.py              # 文本预处理（字符二元语法分词）
+│   ├── analyzer.py                  # 热点话题与趋势分析（jieba 分词）
+│   ├── preprocessor.py              # 文本预处理（字符二元语法分词，主流程未使用）
 │   ├── summarizer.py                # 规则新闻摘要（已实现，主流程未使用）
-│   └── model_inference.py           # GPU 深度学习模型推理（懒加载）
+│   └── model_inference.py           # GPU 深度学习模型推理（懒加载单例）
 │
 ├── models/                          # 预训练模型文件（.gitignore，需手动下载）
 │   ├── bert-base-chinese-sentiment/ # 中文情感三分类
 │   ├── mDeBERTa-v3-base-xnli/       # 多语言零样本分类
-│   └── Qwen2.5-3B-Instruct/         # 灾害提取 + 聊天助手
+│   └── Qwen2.5-3B-Instruct/         # 灾害提取 + 聊天助手（共享同一实例）
 │
 ├── backend/                         # 后端服务
-│   ├── database.py                  # SQLite 数据库管理
-│   ├── api.py                       # aiohttp 路由与业务逻辑
-│   ├── chatbot.py                   # Gradio AI 聊天助手
-│   └── disaster_extraction.py       # AI 灾害信息提取
+│   ├── __init__.py                  # 导出 DatabaseManager, create_app, set_db_manager
+│   ├── database.py                  # SQLite 数据库管理（WAL 模式，懒连接）
+│   ├── api.py                       # aiohttp 路由 + 爬取/NLP 编排 + 价格/天气数据
+│   ├── chatbot.py                   # Gradio AI 聊天助手（工具调用 + 会话管理）
+│   └── disaster_extraction.py       # AI 灾害信息提取（复用 chatbot 的 Qwen 模型）
 │
 ├── frontend/                        # 前端
-│   ├── templates/dashboard.html     # 仪表盘页面
+│   ├── templates/dashboard.html     # 仪表盘页面（4 标签页 + 浮动聊天组件）
 │   └── static/
-│       ├── css/dashboard.css        # 样式
-│       └── js/dashboard.js          # ECharts 图表逻辑
+│       ├── css/dashboard.css        # 仪表盘样式
+│       ├── css/chatbot.css          # 浮动聊天组件样式
+│       ├── js/dashboard.js          # ECharts 图表逻辑 + 天气/市场/爬取控制
+│       └── js/chatbot.js            # 浮动聊天面板控制（iframe 加载 Gradio）
 │
-├── data/                            # 运行时数据（自动生成）
-│   └── agricultural_news.db         # SQLite 数据库（唯一数据存储）
+├── data/                            # 运行时数据
+│   ├── agricultural_dict.txt        # jieba 自定义词典（69 个农业术语）
+│   └── agricultural_news.db         # SQLite 数据库（自动生成，唯一数据存储）
 │
-└── tests/                           # 测试脚本
+└── tests/                           # 测试脚本（手动运行，无测试框架）
     ├── test_crawler.py
-    ├── test_database.py
+    ├── test_database.py             # ⚠️ 已损坏 — API 与当前实现不一致
     └── test_nlp.py
 ```
 
@@ -121,18 +126,24 @@ agricultural-news-analysis/
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `HOST` | `0.0.0.0` | 服务监听地址 |
-| `PORT` | `8000` | 服务端口（被占用时自动递增） |
-| `MODEL_MODE` | `"local"` | NLP 模式：`"mock"` 规则引擎 / `"local"` GPU 深度学习 |
+| `PORT` | `8000` | 服务端口（被占用时自动递增至 8009） |
+| `DEBUG` | `True` | 调试模式 |
+| `DB_PATH` | `data/agricultural_news.db` | SQLite 数据库路径 |
+| `MODEL_MODE` | `"local"` | NLP 模式：`"mock"` 规则引擎 / `"local"` GPU 深度学习（**注意：默认值是 `"local"`，如只需规则引擎请改为 `"mock"`**） |
 | `MODEL_DIR` | `BASE_DIR/"models"` | 预训练模型存放目录 |
 | `SENTIMENT_MODEL` | `"bert-base-chinese-sentiment"` | 情感分析模型名称 |
 | `ZERO_SHOT_MODEL` | `"mDeBERTa-v3-base-xnli"` | 零样本分类模型名称 |
 | `REQUEST_DELAY` | `2.0` | 爬虫请求间隔（秒） |
+| `REQUEST_TIMEOUT` | `15` | HTTP 请求超时（秒） |
+| `MAX_RETRIES` | `3` | 请求失败最大重试次数 |
 | `MAX_NEWS_PER_SOURCE` | `500` | 每个新闻源最大抓取条数 |
+| `MAX_INPUT_LENGTH` | `512` | NLP 模型最大输入长度 |
 | `HOT_TOPIC_WINDOW_DAYS` | `7` | 热点分析时间窗口（天） |
+| `TOP_K_KEYWORDS` | `20` | 热词提取数量 |
 | `DISASTER_NEWS_WINDOW_DAYS` | `7` | AI 灾害提取时间窗口（天） |
-| `DISASTER_EXTRACTION_ENABLED` | `True` | 是否启用 AI 灾害提取 |
-| `CHATBOT_ENABLED` | `True` | 是否启用 AI 聊天助手 |
-| `GRADIO_PORT` | `7860` | Gradio 聊天界面端口 |
+| `DISASTER_EXTRACTION_ENABLED` | `True` | 是否启用 AI 灾害提取（需 Qwen 模型） |
+| `CHATBOT_ENABLED` | `True` | 是否启用 AI 聊天助手（需 Qwen 模型 + gradio） |
+| `GRADIO_PORT` | `7860` | Gradio 聊天界面端口（内部使用，不对外暴露） |
 | `CHATBOT_MODEL` | `"Qwen2.5-3B-Instruct"` | 聊天/提取模型名称 |
 
 ## API 接口
@@ -183,24 +194,30 @@ python tests/test_nlp.py
 
 ## 重要说明
 
-- **增量爬取**：每次调用 `/api/crawl` 均为增量模式，根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。支持通过前端日期选择器过滤爬取范围。
-- **五步爬取流程**：爬取新文章 → 补分析未分析旧文章 → 生成聚合分析 → 同步灾害/市场数据 → AI 灾害信息提取（默认启用，可关闭）。
+- **增量爬取**：每次调用 `/api/crawl` 均为增量模式，根据文章 ID（URL+标题的 MD5）自动跳过已存在的文章。支持通过前端日期选择器过滤爬取范围。分页爬取时连续 3 页无新文章则提前终止。
+- **五步爬取流程**：爬取新文章 → 补分析未分析旧文章 → 生成聚合分析 → 同步灾害/市场数据 → AI 灾害信息提取。**步骤顺序不可变更**：第 4 步会清空并重建 `disaster_warnings` 和 `market_data` 表，第 5 步用 Qwen 模型重新填充 AI 提取的结构化字段（地区、预警等级、灾害类型等）。如果 `DISASTER_EXTRACTION_ENABLED = False`，每次爬取后灾害预警的结构化字段将为空。
 - **AI 灾害提取**：从分类为「灾害预警」的新闻中按需抓取正文，使用 Qwen2.5-3B-Instruct 自动提取发生时间、地点、灾害类型、严重程度和防灾建议，写入 `disaster_warnings` 表。仅处理时间窗口内的文章，正文抓取后持久保存到 `news_articles.content`，避免重复请求。
+- **Qwen 模型共享**：聊天助手（`chatbot.py`）和灾害提取（`disaster_extraction.py`）共享同一个 Qwen 模型实例（~5.8 GB 显存），通过 `chatbot.py` 的模块级 `_model_cache` 字典实现。模型首次使用时懒加载，两个模块不会重复占用显存。
+- **正文按需抓取**：爬虫阶段仅保存标题（content = title），NLP 分类/情感分析基于标题进行。正文抓取仅在 AI 灾害提取时按需触发（仅针对「灾害预警」类文章），抓取后回写到 `news_articles.content`。
 - **启动行为**：`main.py` 启动后立即展示最近一次的分析结果，不在启动时自动爬取。点击仪表盘「爬取实时新闻」按钮触发完整五步流程。
-- **纯数据库存储**：所有数据读写均通过 SQLite，不再产生 JSON 中间文件。
+- **纯数据库存储**：所有数据读写均通过 SQLite，不产生 JSON 中间文件。`analysis_results` 表在每次启动时被清空并由 `refresh_aggregate_analysis()` 重建。
+- **`MODEL_MODE` 默认值**：`config.py` 中 `MODEL_MODE` 默认为 `"local"`（GPU 深度学习模式）。如果未安装 `transformers` 和 `torch`，模型加载会自动回退到规则引擎，但 `_classify_and_sentiment_batch()` 中有无条件 `import torch` 会导致爬取崩溃。如不使用 GPU 模型，建议将 `MODEL_MODE` 改为 `"mock"`。
 
 ## NLP 模式
 
-### Mock 模式（规则引擎）
+### Mock 模式（规则引擎，推荐默认使用）
 
 编辑 `config.py` 设置 `MODEL_MODE = "mock"` 使用纯规则引擎：
-- 分类基于关键词词典匹配
-- 分词基于 jieba 中文分词
-- 情感分析基于正负面词表
+- 分类基于关键词词典匹配（6 分类，~100 个关键词）
+- 分词基于 jieba 中文分词（加载自定义农业词典 `data/agricultural_dict.txt`）
+- 情感分析基于正负面词表（字符级匹配 + 比例计算）
+- 风险评分基于正则关键词（灾害术语 = 0.8，病虫害 = 0.7 等）
 
-### Local 模式（GPU 深度学习）
+> **注意**：`config.py` 中 `MODEL_MODE` 的默认值是 `"local"`，需要手动改为 `"mock"`。如果在 `"local"` 模式下未安装 `torch`，爬取时会因 `_classify_and_sentiment_batch()` 中的无条件 `import torch` 而崩溃。
 
-`MODEL_MODE = "local"`（默认）启用深度学习模型，需将模型文件放入 `models/` 目录：
+### Local 模式（GPU 深度学习，可选）
+
+`MODEL_MODE = "local"` 启用深度学习模型，需将模型文件放入 `models/` 目录：
 
 ```bash
 # 1. 安装 GPU 依赖
@@ -218,12 +235,12 @@ pip install transformers torch
 |------|------|------|
 | `ModelNewsClassifier` | `nlp/model_inference.py` | 新闻六分类（mDeBERTa-v3 零样本） |
 | `ModelSentimentAnalyzer` | `nlp/model_inference.py` | 情感三分类 + 风险评分（BERT 中文） |
-| Qwen2.5-3B-Instruct | `backend/chatbot.py` | 灾害信息提取 + AI 聊天助手 |
+| Qwen2.5-3B-Instruct | `backend/chatbot.py` | 灾害信息提取 + AI 聊天助手（**共享同一实例**） |
 
 **技术细节：**
 
-- 模型采用**懒加载**：首次调用才加载到 GPU 显存，不影响启动速度
+- NLP 模型（BERT + mDeBERTa）采用**懒加载单例**：首次调用才加载到 GPU 显存，不影响启动速度
+- Qwen 模型同样懒加载，且由 `chatbot.py` 和 `disaster_extraction.py` **共享同一实例**（通过 `_ensure_model_loaded()` 导入），不重复占显存（~5.8 GB）
 - 情感分析支持 **GPU 批量推理**（batch_size=64）
 - 风险评分保留**规则匹配**（灾害术语几乎无歧义，关键词匹配比模型更可靠）
-- 模型加载失败时自动回退规则引擎，不影响服务可用性
-- Qwen 模型由 chatbot 和 disaster_extraction **共享同一实例**，不重复占显存
+- NLP 模型加载失败时自动回退规则引擎，不影响服务可用性
