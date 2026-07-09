@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # main.py 核心修改部分
 def main():
     from backend.database import DatabaseManager
-    from backend.api import create_app, set_db_manager, refresh_aggregate_analysis
+    from backend.api import create_app, set_db_manager, refresh_aggregate_analysis, sync_disaster_and_market_from_news
 
     config.ensure_dirs()
     logger.info("=== Agri News Analysis System ===")
@@ -19,18 +19,15 @@ def main():
     db.conn
     set_db_manager(db)
 
-    # 清理旧数据库中残留的演示数据（source='demo'）
     db.clear_demo_data()
 
     stats = db.get_statistics()
-    logger.info(f"数据库现有 {stats['total_news']} 条新闻，{stats.get('analyzed_articles', 0)} 条已分析。")
-    logger.info("系统已就绪，点击「爬取实时新闻」按钮获取最新农业新闻数据并进行分析。")
-
-    stats = db.get_statistics()
     if stats["total_news"] > 0:
-        # 启动时基于已有数据生成聚合分析（不涉及爬取和单条NLP）
+        # 启动时基于已有数据生成聚合分析
         refresh_aggregate_analysis(db)
-        logger.info("聚合分析已基于现有数据生成。")
+        # 同步灾害预警和市场数据
+        sync_disaster_and_market_from_news(db)
+        logger.info("聚合分析和数据同步已完成。")
     else:
         logger.info("数据库中没有新闻，请点击「爬取实时新闻」获取数据。")
 

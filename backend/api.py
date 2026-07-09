@@ -8,30 +8,43 @@ from config import config
 logger = logging.getLogger(__name__)
 _db_manager = None
 
+
 def set_db_manager(db):
-    global _db_manager; _db_manager = db
+    global _db_manager;
+    _db_manager = db
+
 
 def get_db():
     global _db_manager
     if _db_manager is None:
         from backend.database import DatabaseManager
-        _db_manager = DatabaseManager(); _db_manager.conn
+        _db_manager = DatabaseManager();
+        _db_manager.conn
     return _db_manager
+
 
 def json_resp(data, status=200):
     return web.json_response(data, status=status, dumps=lambda o: json.dumps(o, ensure_ascii=False, default=str))
 
-async def handle_index(request): return json_resp({"name":"农业新闻分析与预警系统","version":"1.0.0","status":"running"})
+
+async def handle_index(request): return json_resp(
+    {"name": "农业新闻分析与预警系统", "version": "1.0.0", "status": "running"})
+
+
 async def handle_statistics(request):
-    try: return json_resp(get_db().get_statistics())
-    except Exception as e: return json_resp({"error":str(e)},500)
+    try:
+        return json_resp(get_db().get_statistics())
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_news(request):
-    limit = int(request.query.get("limit","50"))
-    offset = int(request.query.get("offset","0"))
-    cat = request.query.get("category",None)
-    start = request.query.get("start_date",None)
-    end = request.query.get("end_date",None)
-    kw = request.query.get("keyword",None)
+    limit = int(request.query.get("limit", "50"))
+    offset = int(request.query.get("offset", "0"))
+    cat = request.query.get("category", None)
+    start = request.query.get("start_date", None)
+    end = request.query.get("end_date", None)
+    kw = request.query.get("keyword", None)
     try:
         if kw:
             if start and end:
@@ -39,11 +52,16 @@ async def handle_news(request):
             return json_resp(get_db().search_news(kw, limit))
         if start and end: return json_resp(get_db().get_news_by_date_range(start, end, limit))
         return json_resp(get_db().get_all_news(limit, offset, cat))
-    except Exception as e: return json_resp({"error":str(e)},500)
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_categories(request):
-    return json_resp({"categories":config.CATEGORY_LABELS})
+    return json_resp({"categories": config.CATEGORY_LABELS})
+
+
 async def handle_disasters(request):
-    limit = int(request.query.get("limit","50"))
+    limit = int(request.query.get("limit", "50"))
     try:
         result = get_db().get_active_disasters(limit)
         if not result:
@@ -51,37 +69,51 @@ async def handle_disasters(request):
             result = get_db().get_all_news(limit, 0, "灾害预警")
         return json_resp(result)
     except Exception as e:
-        return json_resp({"error":str(e)},500)
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_analysis(request):
     try:
         results = get_db().get_recent_analysis("full_analysis")
-        return json_resp(results[0] if results else {"message":"暂无分析结果"})
-    except: return json_resp({"error":"分析失败"},500)
+        return json_resp(results[0] if results else {"message": "暂无分析结果"})
+    except:
+        return json_resp({"error": "分析失败"}, 500)
+
+
 async def handle_keywords(request):
     try:
         results = get_db().get_recent_analysis("hot_keywords")
-        data = results[0] if results else {"keywords":[]}
-        logger.info(f"[DEBUG] handle_keywords 返回: {{'keywords_count': {len(data.get('keywords',[]))}}}")
+        data = results[0] if results else {"keywords": []}
+        logger.info(f"[DEBUG] handle_keywords 返回: {{'keywords_count': {len(data.get('keywords', []))}}}")
         return json_resp(data)
-    except Exception as e: return json_resp({"error":str(e)},500)
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_trend(request):
     try:
         results = get_db().get_recent_analysis("trend")
-        data = results[0] if results else {"trend":{}}
-        trend_keys = list(data.get("trend",{}).keys()) if data.get("trend") else []
+        data = results[0] if results else {"trend": {}}
+        trend_keys = list(data.get("trend", {}).keys()) if data.get("trend") else []
         logger.info(f"[DEBUG] handle_trend 返回: {{'trend_dates': {trend_keys}}}")
         return json_resp(data)
-    except Exception as e: return json_resp({"error":str(e)},500)
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_sentiment_summary(request):
     """情感摘要 + 综合得分"""
-    start = request.query.get("start_date",None)
-    end = request.query.get("end_date",None)
+    start = request.query.get("start_date", None)
+    end = request.query.get("end_date", None)
     try:
         summary = get_db().get_sentiment_summary(start, end)
         # Add comparison
         summary["analysis"] = f"今日农业舆情综合得分 {summary['score_10']} 分，整体偏向{summary['label']}"
         return json_resp(summary)
-    except Exception as e: return json_resp({"error":str(e)},500)
+    except Exception as e:
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_market(request):
     """市场数据"""
     try:
@@ -90,7 +122,8 @@ async def handle_market(request):
         import urllib.request
         base_url = "https://www.agri.cn/sj/"
         items = []
-        with urllib.request.urlopen(urllib.request.Request(base_url, headers={"User-Agent":"Mozilla/5.0"}), timeout=10) as resp:
+        with urllib.request.urlopen(urllib.request.Request(base_url, headers={"User-Agent": "Mozilla/5.0"}),
+                                    timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="replace")
         doc = lxml_html.fromstring(html)
         for sel in [".trends_list li", ".sj_news_list li", ".dynamic_content_list li"]:
@@ -98,18 +131,25 @@ async def handle_market(request):
                 a = item.cssselect("a")
                 if not a: continue
                 title = a[0].text_content().strip()
-                href = a[0].get("href","")
+                href = a[0].get("href", "")
                 if len(title) > 5:
                     # 用 urljoin 正确解析相对路径
-                    items.append({"title":title, "url":urljoin(base_url, href), "source":"农信网-数据"})
-        return json_resp({"total":len(items), "items":items[:30]})
-    except Exception as e: return json_resp({"error":str(e), "items":[]},200)
+                    items.append({"title": title, "url": urljoin(base_url, href), "source": "农信网-数据"})
+        return json_resp({"total": len(items), "items": items[:30]})
+    except Exception as e:
+        return json_resp({"error": str(e), "items": []}, 200)
+
+
 async def handle_health(request):
-    return json_resp({"status":"healthy","timestamp":datetime.now().isoformat()})
+    return json_resp({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+
 async def handle_dashboard(request):
     tp = config.BASE_DIR / "frontend" / "templates" / "dashboard.html"
-    try: return web.Response(text=tp.read_text(encoding="utf-8"), content_type="text/html")
-    except: return web.Response(text="Template not found", status=404)
+    try:
+        return web.Response(text=tp.read_text(encoding="utf-8"), content_type="text/html")
+    except:
+        return web.Response(text="Template not found", status=404)
 
 
 async def handle_weather(request):
@@ -510,6 +550,7 @@ async def handle_weather(request):
     except Exception as e:
         return json_resp({"error": str(e), "city": city}, 200)
 
+
 def _get_nlp_modules():
     """根据 config.MODEL_MODE 返回 (classifier, sentiment, hot_topic) 实例。
 
@@ -642,6 +683,7 @@ def run_analysis_on_existing(db):
     db.conn.commit()
     logger.info(f"[ANALYSIS] 已分析 {len(arts)} 条旧文章")
 
+
 def refresh_aggregate_analysis(db):
     """基于所有文章重新生成聚合分析（趋势、热词、全量分析）"""
     from nlp import HotTopicAnalyzer
@@ -657,6 +699,7 @@ def refresh_aggregate_analysis(db):
     db.save_analysis("trend", {"trend": trend_data})
     json_path = db.export_model_results_json()
     logger.info(f"[ANALYSIS] 聚合分析已更新，JSON → {json_path}")
+
 
 def run_crawl_pipeline(db, start_date=None, end_date=None):
     """执行爬取+分析新文章，支持按日期过滤"""
@@ -704,7 +747,6 @@ def run_crawl_pipeline(db, start_date=None, end_date=None):
     return len(all_a)
 
 
-
 async def handle_crawl(request):
     """手动爬取触发器 - 支持日期范围过滤"""
     db = get_db()
@@ -719,6 +761,8 @@ async def handle_crawl(request):
 
     # 3. 重新生成聚合分析（基于全部文章）
     refresh_aggregate_analysis(db)
+
+    sync_disaster_and_market_from_news(db)
 
     stats = db.get_statistics()
     return json_resp({
@@ -785,11 +829,11 @@ async def handle_chat_proxy(request):
         # Regular HTTP proxy
         async with aiohttp.ClientSession() as session:
             async with session.request(
-                method=request.method,
-                url=target_url,
-                headers=forward_headers,
-                data=await request.read(),
-                timeout=aiohttp.ClientTimeout(total=30),
+                    method=request.method,
+                    url=target_url,
+                    headers=forward_headers,
+                    data=await request.read(),
+                    timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 response = web.StreamResponse(
                     status=resp.status,
@@ -818,7 +862,7 @@ async def _proxy_websocket(request, target_url):
                 headers={
                     k: v for k, v in request.headers.items()
                     if k.lower() not in ("host", "content-length", "connection", "upgrade",
-                                           "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions")
+                                         "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions")
                 },
                 timeout=30,
             )
@@ -862,6 +906,75 @@ async def _proxy_websocket(request, target_url):
     except Exception as e:
         logger.warning(f"[Proxy] WebSocket 代理失败: {e}")
         return json_resp({"error": "WebSocket 连接失败"}, 502)
+
+
+# ==================== 在 api.py 中添加以下函数 ====================
+
+def sync_disaster_and_market_from_news(db):
+    """
+    从 news_articles 中提取灾害预警和市场行情，同步到专用表。
+    清空旧数据，完全基于分类结果重建。
+    """
+    logger.info("[SYNC] 开始同步灾害预警和市场数据...")
+
+    # 清空旧数据
+    db.conn.execute("DELETE FROM disaster_warnings")
+    db.conn.execute("DELETE FROM market_data")
+    db.conn.commit()
+
+    # 1. 灾害预警 (category = "灾害预警")
+    disasters = db.get_all_news(category="灾害预警")
+    inserted_disasters = 0
+    for news in disasters:
+        try:
+            # 从 news 字段映射
+            # 注意：news 中可能没有 region, alert_level, severity, disaster_type 等字段，留空
+            db.conn.execute("""
+                INSERT INTO disaster_warnings (
+                    id, source, region, title, url, date,
+                    alert_level, severity, disaster_type, risk_score, description, crawled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                news["id"],
+                news.get("source", ""),
+                "",  # region 暂空
+                news.get("title", ""),
+                news.get("url", ""),
+                news.get("date", ""),
+                "",  # alert_level 暂空
+                99,  # severity 默认 99（未知）
+                "",  # disaster_type 暂空
+                news.get("risk_score", 0.0),
+                news.get("content", "")[:500],  # description
+                news.get("crawled_at", "")
+            ))
+            inserted_disasters += 1
+        except Exception as e:
+            logger.error(f"插入灾害预警失败 ({news.get('id')}): {e}")
+
+    # 2. 市场行情 (category = "市场行情")
+    markets = db.get_all_news(category="市场行情")
+    inserted_markets = 0
+    for news in markets:
+        try:
+            db.conn.execute("""
+                INSERT INTO market_data (
+                    title, url, category, date, content, crawled_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                news.get("title", ""),
+                news.get("url", ""),
+                news.get("category", ""),
+                news.get("date", ""),
+                news.get("content", ""),
+                news.get("crawled_at", "")
+            ))
+            inserted_markets += 1
+        except Exception as e:
+            logger.error(f"插入市场数据失败 ({news.get('id')}): {e}")
+
+    db.conn.commit()
+    logger.info(f"[SYNC] 同步完成：灾害预警 {inserted_disasters} 条，市场数据 {inserted_markets} 条")
 
 
 def create_app():
