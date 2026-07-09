@@ -9,7 +9,7 @@ import logging
 import re
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,24 @@ def _build_system_prompt(db) -> str:
         total_news = total_disasters = analyzed = 0
         cat_summary = sentiment_text = recent_news_text = disasters_text = "获取失败"
 
+    now = datetime.now()
+    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+    day_labels = ["今天", "明天", "后天", "三天后", "四天后", "五天后", "六天后", "七天后"]
+
+    date_lines = []
+    for i, label in enumerate(day_labels):
+        d = now + timedelta(days=i)
+        date_lines.append(f"- {label}：{d.strftime('%Y年%m月%d日')}（星期{weekdays[d.weekday()]}）")
+    date_table = "\n".join(date_lines)
+    tomorrow_iso = (now + timedelta(days=1)).strftime("%Y-%m-%d")  # for format hint
+
     prompt = f"""你是一个专业的农业新闻分析助手。你可以帮助用户了解最新的农业新闻、灾害预警、市场动态和舆情分析。
+
+## 日期速查表
+{date_table}
+
+查询天气时，请根据用户提到的相对日期（如「明天」「三天后」），在上表中查出对应的准确日期，然后在 get_weather 返回的天气预报中找到该日期的数据回答。
+get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「明天」对应 {tomorrow_iso}。
 
 ## 当前数据库统计
 - 新闻总数：{total_news} 条（已分析 {analyzed} 条）
@@ -165,11 +182,27 @@ def _build_system_prompt(db) -> str:
 - get_disasters：获取活跃灾害预警（无参数）
 - get_sentiment_summary：获取舆情分析总结（无参数）
 - get_news_by_category：按分类查询新闻（参数：category，可选值：政策法规、市场行情、农业科技、灾害预警、国际农业、综合资讯）
+- get_weather：查询指定城市的天气（参数：city，如"北京"、"上海"、"广州"等）
+
+## 工具调用格式（重要！）
+当你需要调用工具时，必须严格按照以下 XML 格式输出，不要输出裸 JSON：
+
+<tool_call>
+{{"name": "函数名", "arguments": {{"参数名": "参数值"}}}}
+</tool_call>
+
+## 时间感知
+- 上方「日期速查表」列出了今天及未来七天的准确日期，请直接用它来查日期，不要自己计算
+- 用户说「今天」「明天」「三天后」→ 在速查表中找到对应的准确日期
+- 回答天气问题时，必须明确说出完整的年月日，例如「今天是2026年07月09日」「三天后是2026年07月12日」
+- get_weather 返回的 daily.time 字段使用 YYYY-MM-DD 格式（如 2026-07-09），查询结果后按日期匹配对应的预报数据
+- 如果用户问的日期超出了七天范围（如「下个月」），诚实告知天气预报最多只能查询未来七天
 
 ## 注意事项
 - 回答要简洁、专业，使用中文
 - 当用户询问数据库中的信息时，优先基于上方已有的「当前数据库统计」「最近新闻」「活跃灾害预警」回答
 - 只有当用户要求更详细的搜索、或查询的信息不在已有上下文中时，才使用工具调用
+- 工具调用必须用 <tool_call> 标签包裹，不要直接输出 JSON
 - 不要编造数据，如果数据库中没有相关信息，诚实告知用户
 """
     return prompt
@@ -178,6 +211,77 @@ def _build_system_prompt(db) -> str:
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
+
+def _query_weather(city: str) -> str:
+    """Query Open-Meteo API for city weather. Returns JSON string."""
+    import urllib.request
+    from backend.api import CITY_COORDS
+
+    if not city or not city.strip():
+        return json.dumps({"error": "请提供城市名称，例如：北京、上海、广州"}, ensure_ascii=False)
+
+    # Fuzzy match: try exact match first, then partial match
+    coords = CITY_COORDS.get(city.strip())
+    if not coords:
+        # Try with "市" suffix
+        coords = CITY_COORDS.get(city.strip() + "市")
+    if not coords:
+        # Try partial match (city name contains query or vice versa)
+        for name, c in CITY_COORDS.items():
+            if city.strip() in name or name in city.strip():
+                coords = c
+                break
+
+    if not coords:
+        return json.dumps(
+            {"error": f"暂不支持查询「{city}」的天气。请使用具体城市名，如：北京、上海、广州、成都等。",
+             "city": city},
+            ensure_ascii=False,
+        )
+
+    try:
+        params = f"latitude={coords['lat']}&longitude={coords['lon']}"
+        api_url = (
+            "https://api.open-meteo.com/v1/forecast?" + params +
+            "&daily=temperature_2m_max,temperature_2m_min,weathercode,precipitation_sum"
+            "&current_weather=true&timezone=Asia/Shanghai"
+        )
+        req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        current = data.get("current_weather", {})
+        daily = data.get("daily", {})
+
+        # Build a readable summary for the chatbot
+        weather_info = {
+            "city": city.strip(),
+            "当前天气": {
+                "温度": f"{current.get('temperature', 'N/A')}°C",
+                "风速": f"{current.get('windspeed', 'N/A')} km/h",
+                "风向": f"{current.get('winddirection', 'N/A')}°",
+                "天气代码": current.get("weathercode", "N/A"),
+            },
+        }
+
+        if daily:
+            days = len(daily.get("time", []))
+            if days > 0:
+                weather_info["未来天气预报"] = []
+                for i in range(min(days, 7)):
+                    day_info = {
+                        "日期": daily["time"][i],
+                        "最高温": f"{daily.get('temperature_2m_max', [None])[i]}°C",
+                        "最低温": f"{daily.get('temperature_2m_min', [None])[i]}°C",
+                        "降水量": f"{daily.get('precipitation_sum', [None])[i]} mm",
+                    }
+                    weather_info["未来天气预报"].append(day_info)
+
+        return json.dumps(weather_info, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"[Chatbot] 天气查询失败 ({city}): {e}")
+        return json.dumps({"error": f"天气查询失败: {e}", "city": city}, ensure_ascii=False)
+
 
 def _make_tool_handlers(db):
     """Create tool dispatch table bound to a DatabaseManager instance."""
@@ -194,21 +298,53 @@ def _make_tool_handlers(db):
             db.get_sentiment_summary(), ensure_ascii=False),
         "get_news_by_category": lambda category="", **kw: json.dumps(
             db.get_all_news(limit=10, category=category), ensure_ascii=False, default=str),
+        "get_weather": lambda city="", **kw: _query_weather(city),
     }
 
 
 def _parse_tool_calls(text: str) -> list[dict]:
-    """Parse <tool_call>{json}</tool_call> blocks from model output."""
-    pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
-    matches = re.findall(pattern, text, re.DOTALL)
+    """Parse tool calls from model output (XML-wrapped or bare JSON)."""
     tools = []
-    for m in matches:
+
+    # Method 1: <tool_call>{json}</tool_call> XML blocks
+    xml_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+    for m in re.findall(xml_pattern, text, re.DOTALL):
         try:
             tool = json.loads(m.strip())
             if "name" in tool:
                 tools.append(tool)
         except json.JSONDecodeError:
-            logger.warning(f"[Chatbot] 无法解析工具调用: {m[:200]}")
+            logger.warning(f"[Chatbot] 无法解析 XML 工具调用: {m[:200]}")
+
+    if tools:
+        return tools
+
+    # Method 2: bare JSON tool calls like {"name": "get_weather", "arguments": {...}}
+    # Use brace counting to find JSON objects, then check if they are valid tool calls
+    known_tools = {
+        "get_statistics", "search_news", "get_recent_news", "get_disasters",
+        "get_sentiment_summary", "get_news_by_category", "get_weather",
+    }
+    for match in re.finditer(r"\{", text):
+        start = match.start()
+        depth = 0
+        end = start
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        candidate = text[start:end]
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict) and "name" in obj and obj["name"] in known_tools:
+                tools.append(obj)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
     return tools
 
 
@@ -389,8 +525,16 @@ def chat_fn(message: str, history: list, request: any = None):
             continue  # loop again with tool results injected
 
         # No tool calls or max rounds reached — yield final response
-        # Strip any remaining tool call tags for display
-        display_text = re.sub(r"<tool_call>.*?</tool_call>", "", clean_response, flags=re.DOTALL).strip()
+        # Strip tool call tags and bare JSON tool calls for display
+        display_text = re.sub(r"<tool_call>.*?</tool_call>", "", clean_response, flags=re.DOTALL)
+        known_tool_names = (
+            "get_statistics|search_news|get_recent_news|get_disasters"
+            "|get_sentiment_summary|get_news_by_category|get_weather"
+        )
+        display_text = re.sub(
+            r'\{\s*"name"\s*:\s*"(' + known_tool_names + r')"[^}]*\}',
+            "", display_text
+        ).strip()
         if not display_text:
             display_text = "抱歉，我暂时无法回答这个问题。请换个方式提问试试。"
 
