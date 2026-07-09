@@ -370,11 +370,21 @@ def extract_disaster_info_from_ai(db, force=False) -> dict:
                 for k in ("occurrence_time", "region", "disaster_type", "suggestions")
             )
 
-            # Step 4: 更新数据库（即使未提取到信息也写入，标记为已尝试）
+            # Step 4: 更新数据库，同时确保「已处理」标记可靠
+            # 保证规则：AI 处理过的记录，要么有非空 region/disaster_type，
+            # 要么 severity ∈ {0,1,2,3,4}，绝不会停留在初始值 severity=99 + 空字段。
             try:
+                extracted_region = (item.get("region") or "").strip()
+                extracted_dtype = (item.get("disaster_type") or "").strip()
+                raw_severity = _safe_int(item.get("severity"), 99)
+
                 if not has_info and not force:
-                    # 无灾害信息：标记 severity=0 表示"AI 已尝试，未发现灾害"
+                    # 完全未提取到任何信息 → 标记已尝试
                     item["severity"] = 0
+                elif not extracted_region and not extracted_dtype and raw_severity == 99:
+                    # 有 suggestions/occurrence_time 但缺少结构化字段 → 标记已处理
+                    item["severity"] = 0
+
                 _update_disaster_record(db, aid, item)
                 total_extracted += 1
             except Exception as e:

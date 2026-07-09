@@ -270,10 +270,11 @@ class DatabaseManager:
     def get_already_extracted_disaster_ids(self, article_ids: list[str]) -> set[str]:
         """从给定文章 ID 列表中，返回已有 AI 提取结果的 ID。
 
-        判断标准：disaster_warnings 中 severity != 99。
-        - severity 1-4: AI 提取到了具体灾害信息
-        - severity 0:   AI 已尝试但未发现灾害信息
-        - severity 99:  尚未经 AI 处理（sync 初始值）
+        判断标准（满足任一即视为已处理）：
+        - region 或 disaster_type 非空（提取到了有效灾害信息）
+        - severity = 0（AI 已尝试但未发现灾害信息）
+        - severity 在 1-4 之间（AI 提取到了具体灾害等级）
+        排除：severity=99 且 region/disaster_type 均为空（sync 初始值，未处理）
         """
         if not article_ids:
             return set()
@@ -282,7 +283,11 @@ class DatabaseManager:
         c.execute(f"""
             SELECT id FROM disaster_warnings
             WHERE id IN ({placeholders})
-              AND severity != 99
+              AND (
+                (region IS NOT NULL AND region != '')
+                OR (disaster_type IS NOT NULL AND disaster_type != '')
+                OR severity IN (0, 1, 2, 3, 4)
+              )
         """, article_ids)
         return {r[0] for r in c.fetchall()}
 
