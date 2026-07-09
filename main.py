@@ -27,6 +27,14 @@ def main():
         refresh_aggregate_analysis(db)
         # 同步灾害预警和市场数据
         sync_disaster_and_market_from_news(db)
+        # AI 灾害信息提取（可选，首次加载模型需数秒）
+        if config.DISASTER_EXTRACTION_ENABLED:
+            try:
+                from backend.disaster_extraction import extract_disaster_info_from_ai
+                extract_result = extract_disaster_info_from_ai(db)
+                logger.info(f"AI 灾害提取完成: {extract_result}")
+            except Exception as e:
+                logger.error(f"AI 灾害提取失败 (非致命): {e}")
         logger.info("聚合分析和数据同步已完成。")
     else:
         logger.info("数据库中没有新闻，请点击「爬取实时新闻」获取数据。")

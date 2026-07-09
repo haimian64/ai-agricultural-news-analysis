@@ -135,10 +135,6 @@ class ModelNewsClassifier:
             a["classifier_scores"] = result.get("scores", {})
         return articles
 
-    @staticmethod
-    def get_categories() -> list[str]:
-        return CATEGORY_LABELS
-
 
 class ModelSentimentAnalyzer:
     """基于 BERT 中文情感模型 + 规则风险评分的分析器。

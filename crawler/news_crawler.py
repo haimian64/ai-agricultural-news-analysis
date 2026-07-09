@@ -1,15 +1,14 @@
 """
 农业新闻爬虫 - 使用 urllib + lxml
 """
-import hashlib, json, random, re, time, logging, urllib.request, urllib.error
+import hashlib, re, time, logging, urllib.request, urllib.error
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import urljoin, quote, urlparse
 
 from lxml import html as lxml_html
 
 from config import config
-from .sources import NewsSource, NEWS_SOURCES
+from .sources import NEWS_SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +22,6 @@ class AgriculturalNewsCrawler:
     def __init__(self, sources=None, known_ids=None):
         self.sources = sources or NEWS_SOURCES
         self.known_ids = known_ids or set()
-        self.raw_dir = config.RAW_DIR / "news"
-        self.raw_dir.mkdir(parents=True, exist_ok=True)
 
     def _request(self, url, retry_on_404=False):
         for attempt in range(config.MAX_RETRIES):
@@ -233,7 +230,7 @@ class AgriculturalNewsCrawler:
             if source.page_url_template and urls.index(page_url) < len(urls) - 1:
                 time.sleep(config.REQUEST_DELAY)
         for a in articles:
-            # Use title as summary (skip content fetching for speed)
+            # 正文抓取交由灾害提取模块按需处理，爬虫阶段仅存标题
             a["content"] = a["title"]
             a["summary"] = a["title"]
         logger.info(f"{source.name}: {len(articles)} articles")
@@ -250,10 +247,6 @@ class AgriculturalNewsCrawler:
             if a["id"] not in seen:
                 seen.add(a["id"])
                 uniq.append(a)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        p = self.raw_dir / f"news_{ts}.json"
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(uniq, f, ensure_ascii=False, indent=2)
         logger.info(f"Crawl done: {len(uniq)} articles")
         return uniq
     def _is_valid_news_item(self, source, title, link):

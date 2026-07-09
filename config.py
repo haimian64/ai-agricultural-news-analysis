@@ -1,9 +1,7 @@
 """
 全局配置
 """
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 class Config:
@@ -33,23 +31,18 @@ class Config:
     HOT_TOPIC_WINDOW_DAYS = 7
     TOP_K_KEYWORDS = 20
 
-    # 调度器
-    SCHEDULER_ENABLED = True
-    CRAWL_INTERVAL_MINUTES = 60
-    ANALYSIS_INTERVAL_MINUTES = 30
+    # 灾害提取
+    DISASTER_NEWS_WINDOW_DAYS = 7       # AI 灾害提取的时间窗口（天）
+    DISASTER_EXTRACTION_ENABLED = True  # 是否启用 AI 灾害提取
 
     # 聊天机器人
     CHATBOT_ENABLED = True
     GRADIO_PORT = 7860
     CHATBOT_MODEL = "Qwen2.5-3B-Instruct"
-    MAX_CONVERSATION_TURNS = 20
-    MAX_TOOL_CALL_ROUNDS = 3
 
     # 路径
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"
-    RAW_DIR = DATA_DIR / "raw"
-    PROCESSED_DIR = DATA_DIR / "processed"
     DB_DIR = DATA_DIR
     MODEL_DIR = BASE_DIR / "models"                      # 深度学习模型目录
     SENTIMENT_MODEL = "bert-base-chinese-sentiment"      # 中文情感三分类（GPU）
@@ -57,8 +50,6 @@ class Config:
 
     @classmethod
     def ensure_dirs(cls):
-        cls.RAW_DIR.mkdir(parents=True, exist_ok=True)
-        cls.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
         cls.DB_DIR.mkdir(parents=True, exist_ok=True)
         (cls.DATA_DIR / "models").mkdir(parents=True, exist_ok=True)
 

@@ -1,5 +1,5 @@
 """API路由 - 添加搜索/日期筛选/情感摘要/市场数据端点"""
-import asyncio, json, logging, re
+import asyncio, json, logging
 from datetime import datetime
 import aiohttp
 from aiohttp import web
@@ -25,10 +25,6 @@ def get_db():
 
 def json_resp(data, status=200):
     return web.json_response(data, status=status, dumps=lambda o: json.dumps(o, ensure_ascii=False, default=str))
-
-
-async def handle_index(request): return json_resp(
-    {"name": "农业新闻分析与预警系统", "version": "1.0.0", "status": "running"})
 
 
 async def handle_statistics(request):
@@ -115,27 +111,14 @@ async def handle_sentiment_summary(request):
 
 
 async def handle_market(request):
-    """市场数据"""
+    """市场数据 — 从数据库 market_data 表读取"""
     try:
-        from urllib.parse import urljoin
-        from lxml import html as lxml_html
-        import urllib.request
-        base_url = "https://www.agri.cn/sj/"
-        items = []
-        with urllib.request.urlopen(urllib.request.Request(base_url, headers={"User-Agent": "Mozilla/5.0"}),
-                                    timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-        doc = lxml_html.fromstring(html)
-        for sel in [".trends_list li", ".sj_news_list li", ".dynamic_content_list li"]:
-            for item in doc.cssselect(sel):
-                a = item.cssselect("a")
-                if not a: continue
-                title = a[0].text_content().strip()
-                href = a[0].get("href", "")
-                if len(title) > 5:
-                    # 用 urljoin 正确解析相对路径
-                    items.append({"title": title, "url": urljoin(base_url, href), "source": "农信网-数据"})
-        return json_resp({"total": len(items), "items": items[:30]})
+        limit = int(request.query.get("limit", "30"))
+        items = get_db().get_market_data(limit)
+        return json_resp({
+            "total": len(items),
+            "items": [{"title": r["title"], "url": r["url"], "source": r.get("source", "") or "农信网"} for r in items],
+        })
     except Exception as e:
         return json_resp({"error": str(e), "items": []}, 200)
 
@@ -701,8 +684,7 @@ def refresh_aggregate_analysis(db):
     db.save_analysis("hot_keywords", {"keywords": ha.extract_keywords(
         [a.get("title", "") for a in all_arts if a.get("title")], 30)})
     db.save_analysis("trend", {"trend": trend_data})
-    json_path = db.export_model_results_json()
-    logger.info(f"[ANALYSIS] 聚合分析已更新，JSON → {json_path}")
+    logger.info("[ANALYSIS] 聚合分析已更新")
 
 
 def run_crawl_pipeline(db, start_date=None, end_date=None):
@@ -768,6 +750,15 @@ async def handle_crawl(request):
 
     sync_disaster_and_market_from_news(db)
 
+    # 5. AI 灾害信息提取（从新闻文本中提取结构化灾害信息）
+    if config.DISASTER_EXTRACTION_ENABLED:
+        try:
+            from backend.disaster_extraction import extract_disaster_info_from_ai
+            extract_result = extract_disaster_info_from_ai(db)
+            logger.info(f"[CRAWL] AI 灾害提取完成: {extract_result}")
+        except Exception as e:
+            logger.error(f"[CRAWL] AI 灾害提取失败 (非致命): {e}")
+
     stats = db.get_statistics()
     return json_resp({
         "crawled": new_count,
@@ -776,18 +767,26 @@ async def handle_crawl(request):
     })
 
 
+async def handle_disaster_extraction(request):
+    """手动触发 AI 灾害信息提取。支持 ?force=1 强制更新所有记录。"""
+    if not config.DISASTER_EXTRACTION_ENABLED:
+        return json_resp({"error": "灾害提取功能未启用，请在 config.py 中设置 DISASTER_EXTRACTION_ENABLED = True"}, 400)
+    try:
+        from backend.disaster_extraction import extract_disaster_info_from_ai
+        force = request.query.get("force", "0") == "1"
+        result = extract_disaster_info_from_ai(get_db(), force=force)
+        return json_resp(result)
+    except Exception as e:
+        logger.error(f"[API] 灾害提取失败: {e}")
+        return json_resp({"error": str(e)}, 500)
+
+
 async def handle_model_results(request):
     """获取模型推理结果详情。
     支持 ?article_id=xxx 查询单条，否则返回汇总列表。
-    支持 ?export=1 触发 JSON 导出。
     """
     try:
         article_id = request.query.get("article_id", None)
-        do_export = request.query.get("export", None)
-
-        if do_export:
-            path = get_db().export_model_results_json()
-            return json_resp({"exported": True, "path": path})
 
         if article_id:
             r = get_db().get_article_model_result(article_id)
@@ -963,11 +962,12 @@ def sync_disaster_and_market_from_news(db):
         try:
             db.conn.execute("""
                 INSERT INTO market_data (
-                    title, url, category, date, content, crawled_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    title, url, source, category, date, content, crawled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 news.get("title", ""),
                 news.get("url", ""),
+                news.get("source", ""),
                 news.get("category", ""),
                 news.get("date", ""),
                 news.get("content", ""),
@@ -997,6 +997,7 @@ def create_app():
     app.router.add_get("/api/weather", handle_weather)
     app.router.add_get("/api/crawl", handle_crawl)
     app.router.add_get("/api/model-results", handle_model_results)
+    app.router.add_get("/api/disasters/extract", handle_disaster_extraction)
     app.router.add_get("/dashboard", handle_dashboard)
     sd = str(config.BASE_DIR / "frontend" / "static")
     app.router.add_static("/static/", sd)

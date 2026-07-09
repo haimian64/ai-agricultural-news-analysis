@@ -43,6 +43,3 @@ class NewsClassifier:
             article["category"] = result["category"]
             article["classifier_scores"] = result.get("scores", {})
         return articles
-
-    def get_categories(self):
-        return CATEGORIES
