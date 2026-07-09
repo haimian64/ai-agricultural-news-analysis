@@ -350,25 +350,7 @@
     }
 
     async function loadMarket() {
-        var data = await fetchJSON(API + "/market");
-        if (!data) return;
-        var container = byId("marketList");
-        if (!container) return;
-        if (data.items && data.items.length) {
-            container.innerHTML = data.items.map(function (item, idx) {
-                var href = fixUrl(item.url);
-                var src = item.source || "农信网";
-                return "<div class='market-item'>" +
-                    "<div class='market-num'>" + (idx + 1) + "</div>" +
-                    "<div class='market-body'>" +
-                    "<div class='market-title'><a href='" + href + "' target='_blank'>" + item.title + "</a></div>" +
-                    "<div class='market-meta'><span class='market-source'>" + src + "</span></div>" +
-                    "</div>" +
-                    "</div>";
-            }).join("");
-        } else {
-            container.innerHTML = "<div class='market-empty'><div class='empty-icon'>📊</div><div>暂无市场数据</div><div class='empty-hint'>点击「爬取实时新闻」获取最新市场动态</div></div>";
-        }
+        initMarketPrices();
     }
 
     function initWeather() {
@@ -583,7 +565,9 @@
             byId("keywordNewsRow").style.display = "none";
             await keywordFilter(null);
         };
-        byId("btnMarket").onclick = loadMarket;
+        byId("priceCategory").onchange = function(){updateCommodityDropdown(this.value);queryPrice();};
+        byId("priceCommodity").onchange = function(){queryPrice();};
+        byId("btnQueryPrice").onclick = function(){queryPrice();};
         byId("btnRefreshDisasters").onclick = loadDisasters;
         await Promise.all([
             loadStatistics(), loadCategoryChart(), loadSentimentChart(),
@@ -597,4 +581,207 @@
     }
 
     document.addEventListener("DOMContentLoaded", init);
+// ===== 农产品市场价格查询模块 =====
+var PRICE_DATA = {
+    categories: [
+        {name:"粮食", items:["稻谷","小麦","玉米","大豆","马铃薯"]},
+        {name:"油料", items:["花生","油菜籽"]},
+        {name:"棉花", items:["棉花"]},
+        {name:"食糖", items:["甘蔗"]},
+        {name:"蔬菜", items:["大白菜","黄瓜","大蒜"]},
+        {name:"水果", items:["梨","香蕉","柑桔","葡萄"]},
+        {name:"畜禽", items:["猪","牛","绵羊","鸡","蛋","牛奶"]}
+    ],
+    basePrices: {
+        "稻谷":2.78,"小麦":3.10,"玉米":2.72,"大豆":5.45,"马铃薯":2.80,
+        "花生":8.60,"油菜籽":5.80,"棉花":16.50,"甘蔗":3.20,
+        "大白菜":1.65,"黄瓜":4.50,"大蒜":12.80,
+        "梨":4.80,"香蕉":5.50,"柑桔":6.50,"葡萄":9.50,
+        "猪":24.80,"牛":71.50,"绵羊":67.00,"鸡":16.50,"蛋":9.80,"牛奶":12.50
+    },
+    markets: ["北京新发地","上海江桥","广州江南","深圳海吉星","成都驷马桥","武汉四季美","郑州万邦","西安欣桥","长沙红星","重庆双福","南京众彩"]
+};
+var priceChart = null;
+
+function initMarketPrices() {
+    var catEl = byId("priceCategory");
+    var comEl = byId("priceCommodity");
+    if (!catEl || !comEl) return;
+    updateCommodityDropdown(catEl.value || "粮食");
+    queryPrice();
+}
+
+function updateCommodityDropdown(category) {
+    var cat = PRICE_DATA.categories.find(function(c) { return c.name === category; });
+    var items = cat ? cat.items : [];
+    var comEl = byId("priceCommodity");
+    if (!comEl) return;
+    comEl.innerHTML = items.map(function(i) { return '<option value="' + i + '">' + i + '</option>'; }).join("");
+    if (items.length > 0) { comEl.value = items[0]; byId("pCurrent").textContent = "--"; }
+}
+
+function genPriceData(commodity, days) {
+    days = days || 7;
+    var base = PRICE_DATA.basePrices[commodity] || 5.00;
+    var current = Math.round(base * (0.97 + Math.random() * 0.06) * 100) / 100;
+    var prev = Math.round(base * (0.97 + Math.random() * 0.06) * 100) / 100;
+    var change = Math.round((current - prev) * 100) / 100;
+    var changePct = Math.round(change / prev * 10000) / 100;
+    var trend = [];
+    for (var i = days - 1; i >= 0; i--) {
+        var d = new Date(); d.setDate(d.getDate() - i);
+        var mm = ("0" + (d.getMonth() + 1)).slice(-2);
+        var dd = ("0" + d.getDate()).slice(-2);
+        var p = Math.round(base * (1 + Math.sin(i * 0.3) * 0.03 + (Math.random() - 0.5) * 0.02) * 100) / 100;
+        trend.push({ date: mm + "-" + dd, price: p });
+    }
+    var pv = ["北京","上海","广州","深圳","成都","重庆","武汉","郑州","长沙","西安"];
+    var provinces = [];
+    for (var i = 0; i < pv.length; i++) {
+        provinces.push({ province: pv[i], price: Math.round(base * (0.85 + Math.random() * 0.3) * 100) / 100, market_count: Math.floor(Math.random() * 5) + 1 });
+    }
+    provinces.sort(function(a, b) { return b.price - a.price; });
+    var mn = ["北京新发地","上海江桥","广州江南","深圳海吉星","成都驷马桥","武汉四季美","郑州万邦","西安欣桥","长沙红星","重庆双福","南京众彩","杭州农都","合肥周谷堆","天津红旗","沈阳盛发"];
+    var wholesale = [];
+    for (var i = 0; i < 15; i++) {
+        var p = Math.round(base * (0.9 + Math.random() * 0.2) * 100) / 100;
+        wholesale.push({ market: mn[i], price: p, province: pv[Math.floor(Math.random() * pv.length)] });
+    }
+    wholesale.sort(function(a, b) { return b.price - a.price; });
+    return {
+        current_price: current, change: change, change_pct: changePct,
+        national_avg: base, unit: "元/公斤",
+        trend: trend, provinces: provinces, wholesale: wholesale, market_rank: wholesale,
+        updated_at: new Date().toLocaleString("zh-CN"), source: "模拟参考数据（API未响应）"
+    };
+}
+
+function queryPrice() {
+    var comEl = byId("priceCommodity");
+    if (!comEl) return;
+    var commodity = comEl.value || "稻谷";
+    fetchJSON(API + "/market/prices?commodity=" + encodeURIComponent(commodity)).then(function(apiData) {
+        if (apiData && apiData.current_price !== undefined) {
+            renderPriceData(apiData);
+        } else {
+            var data = genPriceData(commodity, 7);
+            renderPriceData(data);
+        }
+    }).catch(function() {
+        var data = genPriceData(commodity, 7);
+        renderPriceData(data);
+    });
+}
+
+function renderPriceData(data) {
+    byId("pCurrent").textContent = (data.current_price || 0) + " 元/公斤";
+    var changeEl = byId("pChange");
+    var chg = data.change || 0;
+    var chgPct = data.change_pct || 0;
+    var cls = chg >= 0 ? "color:#c0392b" : "color:#27ae60";
+    var arrow = chg >= 0 ? "↑" : "↓";
+    changeEl.innerHTML = '<span style="' + cls + '">' + arrow + " " + Math.abs(chg).toFixed(2) + " (" + chgPct.toFixed(2) + "%)</span>";
+    byId("pAvg").textContent = (data.national_avg || data.current_price || 0) + " 元/公斤";
+    byId("pUnit").textContent = data.unit || "元/公斤";
+    byId("pUpdate").textContent = data.updated_at || "";
+    byId("pSource").textContent = data.source || "";
+    drawPriceTrend(data.trend, data.trend_series);
+    drawProvincePrices(data.provinces, data.trend_series);
+    drawWholesaleRanking(data.market_rank || data.wholesale, data.trend_series);
+}
+
+function drawPriceTrend(td, trend_series) {
+    var el = byId("priceTrendChart"); if (!el) return;
+    if (priceChart) { priceChart.dispose(); priceChart = null; }
+    if ((!td || !td.length) && (!trend_series || Object.keys(trend_series).length === 0)) {
+        el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888">暂无趋势数据</div>';
+        return;
+    }
+    priceChart = echarts.init(el);
+    var colors = ["#2e86c1", "#e67e22", "#27ae60", "#c0392b", "#9b59b6"];
+    var option;
+    if (trend_series && Object.keys(trend_series).length > 0) {
+        var allDates = [];
+        var dateSet = {};
+        var series = [];
+        var seriesNames = Object.keys(trend_series);
+        seriesNames.forEach(function(name) {
+            var pts = trend_series[name];
+            pts.forEach(function(p) { if (!dateSet[p.date]) { dateSet[p.date] = true; allDates.push(p.date); } });
+        });
+        allDates = allDates.sort();
+        seriesNames.forEach(function(name, idx) {
+            var pts = trend_series[name];
+            var dataMap = {};
+            pts.forEach(function(p) { dataMap[p.date] = p.price; });
+            var seriesData = allDates.map(function(d) { return dataMap[d] || null; });
+            series.push({ name: name, type: "line", smooth: true, data: seriesData,
+                lineStyle: { width: 2 }, itemStyle: { color: colors[idx % colors.length] },
+                areaStyle: { opacity: 0.1 }, symbol: "circle", symbolSize: 4 });
+        });
+        option = { tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
+            legend: { data: seriesNames, bottom: 0 },
+            grid: { left: 50, right: 20, top: 20, bottom: 55 },
+            xAxis: { type: "category", data: allDates, axisLabel: { fontSize: 11 } },
+            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 } },
+            series: series };
+    } else {
+        option = { tooltip: { trigger: "axis", formatter: function(p) { return p[0].axisValue + "<br/>价格: " + p[0].value + " 元/公斤"; } },
+            grid: { left: 50, right: 20, top: 20, bottom: 30 },
+            xAxis: { type: "category", data: td.map(function(d) { return d.date; }), axisLabel: { fontSize: 11 } },
+            yAxis: { type: "value", name: "元/公斤", nameTextStyle: { fontSize: 11 } },
+            series: [{ type: "line", smooth: true, data: td.map(function(d) { return d.price; }),
+                lineStyle: { width: 2, color: "#2e86c1" }, areaStyle: { color: "rgba(46,134,193,0.1)" },
+                itemStyle: { color: "#2e86c1" },
+                markLine: { data: [{ type: "average", name: "均价" }], label: { fontSize: 11 } } }] };
+    }
+    priceChart.setOption(option);
+}
+
+function drawProvincePrices(provinces, trend_series) {
+    var el = byId("provincePrices"); if (!el) return;
+    var titleEl = el.previousElementSibling;
+    if (titleEl && titleEl.tagName === "H4") {
+        titleEl.textContent = (trend_series && Object.keys(trend_series).length > 0 && (!provinces || provinces.length === 0 || !provinces[0].market_count || provinces[0].market_count === 1)) ? "子品种价格" : "各省价格";
+    }
+    if (!provinces || !provinces.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:#888">暂无数据</div>'; return; }
+    var isSubVariety = trend_series && Object.keys(trend_series).length > 0 && (!provinces[0].market_count || provinces[0].market_count === 1);
+    var col1Name = isSubVariety ? "品种" : "省份";
+    var maxPrice = provinces[0].price;
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+        '<tr style="background:#f5f6fa"><th style="padding:8px 6px;text-align:left">' + col1Name + '</th><th style="padding:8px 6px;text-align:center">市场数</th><th style="padding:8px 6px;text-align:right">均价(元/公斤)</th><th style="padding:8px 6px;text-align:right">价格条</th></tr>' +
+        provinces.map(function(p) {
+            var barW = Math.round(p.price / maxPrice * 100);
+            return '<tr><td style="padding:6px">' + p.province + '</td>' +
+                '<td style="padding:6px;text-align:center;color:#888">' + (p.market_count || "-") + '</td>' +
+                '<td style="padding:6px;text-align:right;font-weight:600;color:#2e86c1">' + p.price.toFixed(2) + '</td>' +
+                '<td style="padding:6px"><div style="height:8px;background:linear-gradient(90deg,#2e86c1,#85c1e9);width:' + barW + '%;border-radius:4px;min-width:4px"></div></td></tr>';
+        }).join("") + '</table>';
+}
+
+function drawWholesaleRanking(wholesale, trend_series) {
+    var el = byId("wholesaleRanking"); if (!el) return;
+    var titleEl = el.previousElementSibling;
+    if (titleEl && titleEl.tagName === "H4") {
+        titleEl.textContent = (trend_series && Object.keys(trend_series).length > 0 && (!wholesale || wholesale.length === 0 || !wholesale[0].province)) ? "子品种价格排行" : "批发市场价格排行";
+    }
+    if (!wholesale || !wholesale.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:#888">暂无批发市场数据</div>'; return; }
+    var isSubVarRank = trend_series && Object.keys(trend_series).length > 0 && (!wholesale[0].province && wholesale[0].province !== undefined || wholesale[0].province === "");
+    var col2Name = isSubVarRank ? "品种" : "市场名称";
+    var col3Name = isSubVarRank ? "分类" : "省份";
+    var top15 = wholesale.slice(0, 15);
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+        '<tr style="background:#f5f6fa"><th style="padding:8px 4px;text-align:center;width:36px">排名</th><th style="padding:8px 4px;text-align:left">' + col2Name + '</th><th style="padding:8px 4px;text-align:left">' + col3Name + '</th><th style="padding:8px 4px;text-align:right">价格(元/公斤)</th></tr>' +
+        top15.map(function(m, i) {
+            var rank = i + 1;
+            var rankColor = rank === 1 ? "#c0392b" : rank === 2 ? "#e67e22" : rank === 3 ? "#2980b9" : "#666";
+            var medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : "";
+            return '<tr' + (rank <= 3 ? ' style="font-weight:600;background:#fffdf0"' : "") + '>' +
+                '<td style="padding:6px 4px;text-align:center;color:' + rankColor + '">' + (medal || rank) + '</td>' +
+                '<td style="padding:6px 4px">' + m.market + '</td>' +
+                '<td style="padding:6px 4px;color:#888;font-size:12px">' + (m.province || "") + '</td>' +
+                '<td style="padding:6px 4px;text-align:right;font-weight:600">' + m.price.toFixed(2) + '</td></tr>';
+        }).join("") + '</table>';
+}
+
 })();

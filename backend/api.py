@@ -18,6 +18,10 @@ def get_db():
     global _db_manager
     if _db_manager is None:
         from backend.database import DatabaseManager
+        import urllib.request, json, random, math, re, traceback
+        from datetime import timedelta, date
+        from urllib.parse import urljoin
+        from lxml import html as lxml_html
         _db_manager = DatabaseManager();
         _db_manager.conn
     return _db_manager
@@ -121,6 +125,258 @@ async def handle_market(request):
         })
     except Exception as e:
         return json_resp({"error": str(e), "items": []}, 200)
+
+
+
+
+async def handle_market_categories(request):
+    """返回农产品分类树"""
+    return json_resp({"categories": [{"name":k, "items":v} for k,v in COMMODITY_CATEGORIES.items()]})
+
+
+async def handle_market_prices(request):
+    """查询具体农产品价格、趋势、排名"""
+    commodity = request.query.get("commodity", "稻谷")
+    try:
+        moa_data = _fetch_moa_api(commodity)
+        if moa_data and (moa_data.get("method1") or moa_data.get("method2") or moa_data.get("method3")):
+            return json_resp(_build_response(moa_data, commodity))
+    except Exception as e:
+        logger.warning(f"[MOA PRICE] {commodity}: {e}")
+    return json_resp(_gen_fallback_data(commodity))
+
+
+# 农产品分类数据
+COMMODITY_CATEGORIES = {
+    "粮食": ["稻谷", "小麦", "玉米", "大豆", "马铃薯"],
+    "油料": ["花生", "油菜籽"],
+    "棉花": ["棉花"],
+    "食糖": ["甘蔗"],
+    "蔬菜": ["大白菜", "黄瓜", "大蒜"],
+    "水果": ["梨", "香蕉", "柑桔", "葡萄"],
+    "畜禽": ["猪", "牛", "绵羊", "鸡", "蛋", "牛奶"]
+}
+
+COMMODITY_CODES = {
+    "稻谷":"AA01006", "小麦":"AA01002", "玉米":"AA01009", "大豆":"AA02001", "马铃薯":"AE02003",
+    "花生":"AB01001", "油菜籽":"AB01002",
+    "棉花":"AC010010008",
+    "甘蔗":"AD01001",
+    "大白菜":"AE01001", "黄瓜":"AE04005", "大蒜":"AE02009",
+    "梨":"AF01002", "香蕉":"AF06001", "柑桔":"AF05001", "葡萄":"AF02001",
+    "猪":"AL01002001", "牛":"AL01006", "绵羊":"AL01010", "鸡":"AL02001016", "蛋":"AL05001", "牛奶":"12052314117"
+}
+
+TREND_CODES = {
+    "稻谷":"AA01006", "小麦":"A,AJ,AA,AA01", "玉米":"AA01009,AE99999001", "大豆":"AA02001", "马铃薯":"AE02003",
+    "花生":"AB01001", "油菜籽":"AB01002",
+    "棉花":"AC010010010,AC010010009,AC010010011,AC010010012,AC010010013",
+    "甘蔗":"AD01001",
+    "大白菜":"AE01001", "黄瓜":"AE04005,AE04005001", "大蒜":"AE02009",
+    "梨":"AF01002,AF01002001,AF01002007,AF01002009", "香蕉":"AF06001", "柑桔":"AF05001", "葡萄":"AF02001",
+    "猪":"13191716390,18149414250", "牛":"AL01005008,AL01005009,AL01005007",
+    "绵羊":"AL01009005", "鸡":"AL02001005,AL02005005,AL02009002", "蛋":"AL05002,AL05001", "牛奶":""
+}
+
+COTTON_SUB_NAMES = {
+    "AC010010010": "棉短绒", "AC010010009": "棉纱",
+    "AC010010011": "棉粕", "AC010010012": "棉籽", "AC010010013": "棉壳",
+}
+
+WHOLESALE_CODES = {
+    "稻谷":"AA01006", "小麦":"AA01002", "玉米":"AA01009", "大豆":"AA02001", "马铃薯":"AE02003",
+    "花生":"AB01001", "油菜籽":"AB01002", "棉花":"AC010010008",
+    "甘蔗":"AD01001",
+    "大白菜":"AE01001", "黄瓜":"AE04005", "大蒜":"AE02009",
+    "梨":"AF01002", "香蕉":"AF06001", "柑桔":"AF05001", "葡萄":"AF02001",
+    "猪":"AL01002001", "牛":"AL01006", "绵羊":"AL01010", "鸡":"AL02001016", "蛋":"AL05001", "牛奶":"12052314117"
+}
+PRICE_CODES = WHOLESALE_CODES
+
+
+def _fetch_moa_api(commodity):
+    """从 ncpscxx.moa.gov.cn 获取真实价格数据"""
+    code = COMMODITY_CODES.get(commodity, "")
+    price_code = PRICE_CODES.get(commodity, code)
+    trend_code = TREND_CODES.get(commodity, "")
+    logger.info(f"[MOA] 查询品种: {commodity}, code={code}")
+    if not code:
+        logger.warning(f"[MOA] 品种 {commodity} 无对应API编码")
+        return None
+    from datetime import date as dt_date
+    today = dt_date.today()
+    week_num = today.isocalendar()[1]
+    two_years_ago = (today.replace(year=today.year - 2)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+    result = {"method1": None, "method2": None, "method3": None}
+    # 方法1: 涨跌排行
+    wk_url = f"/product/common-price-info/quote/change/rank/count?varietyCode={price_code}&date={today.year}-{week_num}"
+    try:
+        wk_req = urllib.request.Request("https://ncpscxx.moa.gov.cn" + wk_url,
+            headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+        with urllib.request.urlopen(wk_req, timeout=10) as wk_resp:
+            result["method1"] = json.loads(wk_resp.read())
+    except Exception as e1:
+        logger.warning(f"[MOA] 方法1 失败: {e1}")
+    # 方法2: 批发市场价格（日期回退）
+    for days_back in range(1, 8):
+        try_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        post_url = f"/product/common-price-info/wholesale/price/count?varietyCode={price_code}&date={try_date}"
+        try:
+            get_req = urllib.request.Request("https://ncpscxx.moa.gov.cn" + post_url,
+                headers={"User-Agent":"Mozilla/5.0","Accept":"application/json",
+                         "Origin":"https://ncpscxx.moa.gov.cn","Referer":"https://ncpscxx.moa.gov.cn/"})
+            with urllib.request.urlopen(get_req, timeout=15) as resp2:
+                raw = json.loads(resp2.read())
+                data_count = len(raw.get("data", [])) if isinstance(raw.get("data"), list) else 0
+                if data_count > 0:
+                    result["method2"] = raw
+                    result["method2_date"] = try_date
+                    break
+        except Exception as e2:
+            pass
+    # 方法3: 全国价格走势
+    if trend_code:
+        trend_url = f"/product/common-price-avg/meat/price/compared/count?dataSource=1&varietyCode={trend_code}&queryStartTime={two_years_ago}&queryEndTime={today_str}"
+        try:
+            trend_req = urllib.request.Request("https://ncpscxx.moa.gov.cn" + trend_url,
+                headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+            with urllib.request.urlopen(trend_req, timeout=15) as trend_resp:
+                result["method3"] = json.loads(trend_resp.read())
+        except Exception as e3:
+            logger.warning(f"[MOA] 方法3 失败: {e3}")
+    if result["method1"] or result["method2"] or result["method3"]:
+        return result
+    return None
+
+
+def _build_response(moa_data, commodity):
+    """将MOA API响应数据组装为前端需要的格式"""
+    now = datetime.now()
+    method1 = moa_data.get("method1", {}) or {}
+    method2 = moa_data.get("method2", {}) or {}
+    method3 = moa_data.get("method3", {}) or {}
+    m2_list = method2.get("data", []) if isinstance(method2.get("data"), list) else []
+    m1_data = method1.get("data", {}) if isinstance(method1.get("data"), dict) else {}
+    m3_list = method3.get("data", []) if isinstance(method3.get("data"), list) else []
+    wholesale, province_map = [], {}
+    for item in m2_list:
+        if not isinstance(item, dict): continue
+        market_name = item.get("MARKET_NAME", "") or item.get("market", "")
+        province_name = item.get("PROVINCE_NAME", "") or item.get("province", "")
+        price = float(item.get("PRICE_MARKET", 0) or item.get("price", 0))
+        prev_price = float(item.get("NEXT_PRICE_MARKET", 0) or item.get("prev", 0) or 0)
+        report_time = item.get("REPORT_TIME", "") or item.get("date", "")
+        if not market_name and province_name: market_name = province_name
+        if market_name and price > 0:
+            wholesale.append({"market": market_name, "price": round(price, 2),
+                "prev": round(prev_price, 2) if prev_price else price,
+                "province": province_name, "date": report_time})
+        if province_name and price > 0:
+            province_map.setdefault(province_name, []).append(price)
+    provinces = []
+    for prov, prices in province_map.items():
+        provinces.append({"province": prov, "price": round(sum(prices) / len(prices), 2), "market_count": len(prices)})
+    provinces.sort(key=lambda x: x["price"], reverse=True)
+    wholesale.sort(key=lambda x: x["price"], reverse=True)
+    trend, trend_series = [], {}
+    trend_code = TREND_CODES.get(commodity, "")
+    is_multi_code = "," in trend_code if trend_code else False
+    if m3_list:
+        if is_multi_code:
+            sub_codes = [c.strip() for c in trend_code.split(",") if c.strip()]
+            for item in m3_list:
+                if isinstance(item, dict):
+                    d = item.get("REPORT_TIME", "") or item.get("date", "") or ""
+                    date_str = str(d).replace("年","-").replace("月","-").replace("日","")
+                    if not date_str: continue
+                    for sc in sub_codes:
+                        p = float(item.get(f"C_{sc}", 0) or 0)
+                        if p > 0:
+                            unit_p = p / 1000 if p > 100 else p
+                            name = COTTON_SUB_NAMES.get(sc, sc)
+                            trend_series.setdefault(name, []).append({"date": date_str, "price": round(unit_p, 2)})
+            date_map = {}
+            for name, pts in trend_series.items():
+                for pt in pts: date_map.setdefault(pt["date"], []).append(pt["price"])
+            for d in sorted(date_map.keys()):
+                trend.append({"date": d, "price": round(sum(date_map[d]) / len(date_map[d]), 2)})
+            if len(trend) > 30: trend = trend[-30:]
+        else:
+            first_code = trend_code.split(",")[0] if trend_code else ""
+            price_key = f"C_{first_code}" if first_code else ""
+            for item in m3_list:
+                if isinstance(item, dict):
+                    d = item.get("REPORT_TIME", "") or item.get("date", "") or ""
+                    p = float(item.get(price_key, 0) or 0)
+                    if d and p > 0:
+                        date_str = str(d).replace("年","-").replace("月","-").replace("日","")
+                        trend.append({"date": date_str, "price": round(p / 1000 if p > 100 else p, 2)})
+            if len(trend) > 30: trend = trend[-30:]
+    # 兜底趋势
+    if not trend:
+        for src in [m1_data.get("rise", []), m1_data.get("fall", [])]:
+            for item in (src if isinstance(src, list) else []):
+                if isinstance(item, dict):
+                    d = item.get("REPORT_TIME") or item.get("date") or ""
+                    p = float(item.get("PRICE_MARKET", 0) or item.get("price", 0))
+                    if d and p > 0: trend.append({"date": str(d), "price": round(p, 2)})
+    if not trend and wholesale:
+        date_map = {}
+        for w in wholesale:
+            if w.get("date"): date_map.setdefault(w["date"], []).append(w["price"])
+        for d in sorted(date_map.keys())[-7:]:
+            trend.append({"date": d, "price": round(sum(date_map[d]) / len(date_map[d]), 2)})
+    if (not wholesale) and trend_series:
+        for name, pts in trend_series.items():
+            if pts: wholesale.append({"market": name, "price": pts[-1]["price"], "prev": pts[-1]["price"], "province": "", "date": pts[-1]["date"]})
+        wholesale.sort(key=lambda x: x["price"], reverse=True)
+    if (not provinces) and trend_series:
+        for name, pts in trend_series.items():
+            if pts: provinces.append({"province": name, "price": pts[-1]["price"], "market_count": 1})
+        provinces.sort(key=lambda x: x["price"], reverse=True)
+    all_prices = [p["price"] for p in provinces] if provinces else [w["price"] for w in wholesale]
+    current_price = round(sum(all_prices) / len(all_prices), 2) if all_prices else 0
+    change, change_pct = 0, 0
+    if wholesale:
+        prevs = [w["prev"] for w in wholesale if w.get("prev", 0) > 0 and w["prev"] != w["price"]]
+        if prevs:
+            prev_avg = round(sum(prevs) / len(prevs), 2)
+            change = round(current_price - prev_avg, 2)
+            change_pct = round(change / prev_avg * 100, 2) if prev_avg else 0
+    return {"commodity": commodity, "trend": trend, "trend_series": trend_series if trend_series else None,
+        "provinces": provinces, "wholesale": wholesale, "market_rank": wholesale,
+        "current_price": current_price, "national_avg": current_price,
+        "change": change, "change_pct": change_pct,
+        "unit": "元/公斤", "source": "农业农村部批发市场信息系统",
+        "updated_at": now.strftime("%Y-%m-%d %H:%M")}
+
+
+def _gen_fallback_data(commodity):
+    """完全模拟数据兜底"""
+    bp = {"稻谷":2.78,"小麦":3.10,"玉米":2.72,"大豆":5.45,"马铃薯":2.80,
+        "花生":8.60,"油菜籽":5.80,"棉花":16.50,"甘蔗":3.20,
+        "大白菜":1.65,"黄瓜":4.50,"大蒜":12.80,"梨":4.80,"香蕉":5.50,
+        "柑橘":6.50,"葡萄":9.50,"猪":24.80,"牛":71.50,"绵羊":67.00,"鸡":16.50,"蛋":9.80,"牛奶":12.50}
+    base = bp.get(commodity, 5.00)
+    now = datetime.now()
+    cur = round(base * (0.97 + random.random()*0.06), 2)
+    prev = round(base * (0.97 + random.random()*0.06), 2)
+    chg = round(cur - prev, 2)
+    cpct = round(chg/prev*100, 2) if prev else 0
+    trend = []
+    for i in range(6, -1, -1):
+        d = now - timedelta(days=i)
+        p = round(base * (1 + math.sin(i*0.3)*0.03 + (random.random()-0.5)*0.02), 2)
+        trend.append({"date": d.strftime("%m-%d"), "price": p})
+    pv = ["北京","上海","广州","深圳","成都","重庆","武汉","郑州"]
+    random.shuffle(pv)
+    provinces = [{"province": p, "price": round(base*(0.85+random.random()*0.3),2)} for p in pv[:6]]
+    mn = ["北京新发地","上海江桥","广州江南","深圳海吉星","成都驯马桥","武汉四季美","郑州万邦","西安新桥"]
+    wholesale = [{"market": m, "price": round(base*(0.9+random.random()*0.2),2)} for m in mn]
+    return {"commodity": commodity, "trend": trend, "provinces": provinces, "wholesale": wholesale,
+        "current_price": cur, "change": chg, "change_pct": cpct,
+        "source": "模拟参考数据（API未响应）", "updated_at": now.strftime("%Y-%m-%d %H:%M")}
 
 
 async def handle_health(request):
@@ -993,6 +1249,8 @@ def create_app():
     app.router.add_get("/api/analysis/trend", handle_trend)
     app.router.add_get("/api/analysis/sentiment-summary", handle_sentiment_summary)
     app.router.add_get("/api/market", handle_market)
+    app.router.add_get("/api/market/categories", handle_market_categories)
+    app.router.add_get("/api/market/prices", handle_market_prices)
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/weather", handle_weather)
     app.router.add_get("/api/crawl", handle_crawl)
