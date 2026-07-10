@@ -4,6 +4,22 @@
 from pathlib import Path
 
 
+def _load_apikeys():
+    """从 ~/apikeys.txt 读取 API 密钥"""
+    keys = {}
+    keyfile = Path.home() / "apikeys.txt"
+    if keyfile.exists():
+        for line in keyfile.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                keys[k.strip()] = v.strip()
+    return keys
+
+
+_apikeys = _load_apikeys()
+
+
 class Config:
     """应用配置 - 集中管理所有配置参数"""
 
@@ -39,6 +55,10 @@ class Config:
     CHATBOT_ENABLED = True
     GRADIO_PORT = 7860
     CHATBOT_MODEL = "Qwen2.5-3B-Instruct"
+    CHATBOT_BACKEND = "local"        # "local"=本地Qwen模型 / "deepseek"=DeepSeek API
+    DEEPSEEK_API_KEY = _apikeys.get("DEEPSEEK_API_KEY", "")  # 从 apikeys.txt 读取
+    DEEPSEEK_MODEL = "deepseek-v4-flash" # DeepSeek 模型名
+    DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
     # MOA 价格缓存
     MOA_MAX_CONCURRENT = 3           # 批量抓取 MOA 价格时的最大并发数

@@ -313,14 +313,25 @@ class DatabaseManager:
         c.execute("SELECT COUNT(*) FROM commodity_prices")
         return c.fetchone()[0] > 0
 
-    def get_active_disasters(self, limit=100):
+    def get_active_disasters(self, limit=100, region=None):
+        """获取活跃灾害预警，支持按地区过滤"""
         c = self.conn.cursor()
-        c.execute("""
-            SELECT * FROM disaster_warnings
-            ORDER BY CASE WHEN severity = 0 OR severity = 99 THEN 1 ELSE 0 END,
-                     severity ASC
-            LIMIT ?
-        """, (limit,))
+        if region:
+            like = f"%{region}%"
+            c.execute("""
+                SELECT * FROM disaster_warnings
+                WHERE (region LIKE ? OR title LIKE ?)
+                ORDER BY CASE WHEN severity = 0 OR severity = 99 THEN 1 ELSE 0 END,
+                         severity ASC
+                LIMIT ?
+            """, (like, like, limit))
+        else:
+            c.execute("""
+                SELECT * FROM disaster_warnings
+                ORDER BY CASE WHEN severity = 0 OR severity = 99 THEN 1 ELSE 0 END,
+                         severity ASC
+                LIMIT ?
+            """, (limit,))
         return [dict(r) for r in c.fetchall()]
 
     def get_already_extracted_disaster_ids(self, article_ids: list[str]) -> set[str]:

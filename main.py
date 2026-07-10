@@ -42,7 +42,7 @@ def main():
     # 启动 Gradio 聊天机器人在后台线程
     if config.CHATBOT_ENABLED:
         import threading
-        from backend.chatbot import create_chatbot_app
+        from backend.chatbot import create_chatbot_app, _CHATBOT_CSS
         chatbot_app = create_chatbot_app(db)
         def _run_gradio():
             chatbot_app.launch(
@@ -52,6 +52,7 @@ def main():
                 share=False,
                 show_error=True,
                 quiet=True,
+                css=_CHATBOT_CSS,
             )
         gradio_thread = threading.Thread(target=_run_gradio, daemon=True)
         gradio_thread.start()
