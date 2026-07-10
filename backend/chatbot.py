@@ -280,11 +280,12 @@ get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「�
 - 「广州」「广州市」「广州江南」→ 自动识别为广东省的城市，查找广东省下 matching 的市场或省份数据
 - 各省份之间互不包含（如「广东」不包含「广西」）
 - 回答地区价格时，需同时给出**全国均价作为参照**，并标注该地区价格与全国均价的差值
-- 举例：用户问「广州猪价」→ 调用 get_price_region(commodity="猪", region="广州") → 系统自动映射广州→广东省 → 返回广东省价格及广州批发市场 → 回答「广州属于广东省，全省猪均价X元/公斤，全国均价Y元/公斤，广东低于全国Z元」
+- 举例（多工具组合）：用户问「广州天气+农业建议」→ 同时调用 get_weather(city="广州") + get_disasters(region="广东") → 如天气失败则用灾害数据 + get_price_region 查广州主要农产品 → 基于实际灾害类型和受影响品种给出针对性建议
 
 ## 灾害地区查询
 - 用户问「广东有什么灾害」「河南近期灾害」→ 调用 get_disasters(region="广东") 获取该地区灾害
-- 用户问特定地区的灾害影响和补救措施 → 先查询该地区灾害，再基于实际数据回答
+- 用户问特定地区的灾害影响和补救措施 → 先查灾害，再查该地区主要农产品价格（get_price_region），结合两者分析影响
+- **综合查询模式**：当用户问「天气+农业」类问题时，应同时调用天气和灾害工具。如果天气工具失败，用灾害数据 + 价格数据 + 地区信息综合分析
 - **不要**把其他地区的灾害说成是用户询问地区的灾害（如不要把「呼伦贝尔」的暴雨说成是广东的）
 - 如果没有该地区的灾害数据，诚实告知「目前系统中没有XX地区的活跃灾害预警」
 - region 参数支持模糊匹配（如传"广东"可匹配"广东"、"广东省"、"云南、贵州、广西、广东..."等多值字段）
@@ -311,10 +312,10 @@ get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「�
 - 如果用户问的日期超出了七天范围（如「下个月」），诚实告知天气预报最多只能查询未来七天
 
 ## 注意事项
-- 回答要简洁、专业，使用中文
-- 当用户询问数据库中的信息时，优先基于上方已有的「当前数据库统计」「最近新闻」「活跃灾害预警」「农产品价格概览」回答
-- **当用户询问特定地区（如「广东」「河南」）的信息时，必须调用带 region 参数的工具获取该地区的真实数据，不要把其他地区的数据混淆**
-- 只有当用户要求更详细的搜索、或查询的信息不在已有上下文中时，才使用工具调用
+- 回答要简洁、专业、使用中文
+- **当用户询问特定地区（如「广东」「广州」）的信息时，必须调用带 region 参数的工具获取该地区的真实数据**。系统提示词中的「活跃灾害预警」是无过滤的全部数据，不能替代地区查询
+- **工具调用失败时的降级策略**：如果某个工具返回错误（如天气查询失败），应尝试调用其他相关工具获取数据。例如天气失败时 → 调用 get_disasters(region="广东") 获取该地区灾害 → 结合价格数据分析影响
+- **农业建议必须基于实际数据**：不要给出「注意排水」「加固设施」等泛泛而谈的建议，而是根据该地区实际灾害类型（暴雨/台风/干旱）和受影响农产品，给出针对性措施
 - 工具调用必须用 <tool_call> 标签包裹，不要直接输出 JSON
 - 不要编造数据，如果数据库中没有相关信息，诚实告知用户
 """
@@ -788,17 +789,10 @@ def _chat_via_deepseek(messages: list[dict], db) -> str:
 # Main chat function (for Gradio ChatInterface)
 # ---------------------------------------------------------------------------
 
-def chat_fn(message: str, history: list, backend: str = "local"):
+def chat_fn(message: str, history: list):
     """
     Chat function for Gradio ChatInterface.
-
-    Args:
-        message: Latest user message (str)
-        history: List of {"role": "user"|"assistant", "content": "..."} dicts
-        backend: "local" for Qwen or "deepseek" for DeepSeek API
-
-    Yields:
-        str chunks for streaming (final yield is the complete response)
+    默认使用 DeepSeek API，失败时自动回退到本地 Qwen 模型。
     """
     # Get database instance
     from backend.api import get_db
@@ -851,12 +845,10 @@ def chat_fn(message: str, history: list, backend: str = "local"):
     if not last_is_current:
         messages.append({"role": "user", "content": message})
 
-    # Route to appropriate backend
+    # Try DeepSeek API first, fall back to local Qwen on failure
     from config import config
-    if backend == "deepseek":
-        if not config.DEEPSEEK_API_KEY:
-            yield "错误：DeepSeek API Key 未配置。请在 config.py 中设置 DEEPSEEK_API_KEY。"
-            return
+    deepseek_failed = False
+    if config.DEEPSEEK_API_KEY:
         try:
             result = _chat_via_deepseek(messages, db)
             messages.append({"role": "assistant", "content": result})
@@ -864,18 +856,21 @@ def chat_fn(message: str, history: list, backend: str = "local"):
             session["messages"] = session_msgs[-40:]
             session["last_active"] = time.time()
             yield result
+            return
         except Exception as e:
-            logger.error(f"[Chatbot] DeepSeek API 调用失败: {e}")
-            yield f"抱歉，DeepSeek API 调用失败：{e}"
-        return
+            logger.warning(f"[Chatbot] DeepSeek API 失败，回退到本地模型: {e}")
+            deepseek_failed = True
+    else:
+        deepseek_failed = True  # No key configured, go straight to local
 
-    # Load local model
-    try:
-        model, tokenizer = _ensure_model_loaded()
-    except Exception as e:
-        logger.error(f"[Chatbot] 模型加载失败: {e}")
-        yield "抱歉，AI 模型加载失败，请稍后重试。"
-        return
+    # Fallback: load local Qwen model
+    if deepseek_failed:
+        try:
+            model, tokenizer = _ensure_model_loaded()
+        except Exception as e:
+            logger.error(f"[Chatbot] 本地模型加载失败: {e}")
+            yield "抱歉，AI 服务暂时不可用（DeepSeek API 和本地模型均失败），请稍后重试。"
+            return
 
     # Tool calling loop (max 3 rounds)
     max_tool_rounds = 3
@@ -1032,12 +1027,6 @@ def create_chatbot_app(db=None):
         title="农业新闻 AI 助手",
         fill_height=True,
     ) as demo:
-        backend_choice = gr.Radio(
-            choices=[("本地 Qwen", "local"), ("DeepSeek API", "deepseek")],
-            value=config.CHATBOT_BACKEND,
-            label="模型后端",
-            interactive=True,
-        )
         gr.ChatInterface(
             fn=chat_fn,
             api_name="chat",
@@ -1049,10 +1038,25 @@ def create_chatbot_app(db=None):
                 submit_btn="发送",
                 elem_classes="chat-submit-row",
             ),
-            additional_inputs=[backend_choice],
             fill_height=True,
             title=None,
             description=None,
+            examples=[
+                "当前有多少条新闻？最近有什么灾害？",
+                "广东近期有什么灾害，对农户有什么影响和补救建议？",
+                "全国猪肉价格怎么样，哪个省最便宜？",
+                "广州近期天气如何，对农业生产有什么建议？",
+                "最近农产品市场行情如何，哪些品种在涨价？",
+                "帮我分析一下近期农业舆情",
+            ],
+            example_labels=[
+                "📊 综合查询",
+                "🌧️ 地区灾害分析",
+                "💰 价格对比",
+                "🌤️ 天气+农业建议",
+                "📈 市场行情",
+                "📝 舆情分析",
+            ],
             cache_examples=False,
         )
 
