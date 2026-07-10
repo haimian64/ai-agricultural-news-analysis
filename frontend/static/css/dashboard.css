@@ -8,6 +8,13 @@ body {
     color: #fff; padding: 14px 24px;
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
 }
+.header-logo {
+    height: 60px; width: auto;
+    vertical-align: middle;
+}
+.header-brand {
+    display: flex; align-items: center; gap: 1.5em;
+}
 .header h1 { font-size: 20px; font-weight: 600; }
 .header h1 span { font-weight: 300; opacity: 0.85; }
 .header-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
