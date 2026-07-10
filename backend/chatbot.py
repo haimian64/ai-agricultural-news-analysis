@@ -665,16 +665,43 @@ def create_chatbot_app(db=None):
     with gr.Blocks(
         title="农业新闻 AI 助手",
         fill_height=True,
+        css="""
+        /* 确保 Gradio 填满 iframe */
+        html, body, #root { height: 100%; margin: 0; padding: 0; }
+        .gradio-container { height: 100% !important; max-width: 100% !important; padding: 0 !important; }
+        /* 发送按钮 — 蓝底白字 */
+        .chat-submit-row button {
+            background: #1a5276 !important;
+            color: #fff !important;
+            border: 1px solid #1a5276 !important;
+            border-radius: 6px !important;
+            font-weight: 500 !important;
+            padding: 6px 16px !important;
+            cursor: pointer !important;
+            transition: background 0.2s !important;
+        }
+        .chat-submit-row button:hover {
+            background: #2e86c1 !important;
+            border-color: #2e86c1 !important;
+        }
+        .chat-submit-row button:active {
+            background: #154360 !important;
+            transform: scale(0.97);
+        }
+        """,
     ) as demo:
         gr.ChatInterface(
             fn=chat_fn,
             api_name="chat",
-            chatbot=gr.Chatbot(height=480),
+            chatbot=gr.Chatbot(height="100%"),
             textbox=gr.Textbox(
                 placeholder="问我关于农业新闻、灾害预警、市场动态等问题...",
                 container=False,
                 scale=7,
+                submit_btn="发送",
+                elem_classes="chat-submit-row",
             ),
+            fill_height=True,
             title=None,
             description=None,
             examples=[

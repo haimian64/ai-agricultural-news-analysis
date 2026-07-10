@@ -64,9 +64,10 @@
     }
 
     function openPanel() {
-        // Restore persisted width if any
+        // Restore persisted width if any (must also clear max-width)
         if (currentWidth > 0) {
             panel.style.width = currentWidth + "px";
+            panel.style.maxWidth = "none";
         }
         panel.classList.add("open");
         fab.style.display = "none";
@@ -95,6 +96,9 @@
         startX = clientX;
         startWidth = panel.getBoundingClientRect().width;
 
+        // Remove CSS max-width constraint so we can expand beyond the initial 37.5vw
+        panel.style.maxWidth = "none";
+
         if (e.touches) e.preventDefault();
     }
 
@@ -102,12 +106,13 @@
         if (!isResizing) return;
 
         var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        // Dragging left = expand panel, right = shrink panel
+        // Dragging left = expand panel (deltaX > 0), right = shrink panel (deltaX < 0)
         var deltaX = startX - clientX;
         var newWidth = startWidth + deltaX;
 
-        // Clamp: min 320px, max 800px
-        newWidth = Math.max(320, Math.min(800, newWidth));
+        // Clamp: min 360px (readable), max 50vw (half viewport)
+        var viewportW = window.innerWidth;
+        newWidth = Math.max(360, Math.min(viewportW * 0.8, newWidth));
         currentWidth = newWidth;
         panel.style.width = newWidth + "px";
 
