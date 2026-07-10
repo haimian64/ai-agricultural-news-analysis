@@ -63,11 +63,12 @@ def main():
     import socket
     for port in range(8000, 8010):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("0.0.0.0", port))
             s.close()
             break
-        except:
+        except OSError:
             s.close()
     else:
         port = 8000
