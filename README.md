@@ -78,7 +78,7 @@ agricultural-news-analysis/
 ├── start.bat                        # Windows 启动脚本（激活 venv + 启动服务，不含安装依赖）
 │
 ├── crawler/                         # 爬虫模块
-│   ├── sources.py                   # 新闻源定义（12 个源，覆盖 5 个机构）
+│   ├── sources.py                   # 新闻源定义（13 个条目，含 1 对重复配置，实际覆盖 5 个机构/4 个域名）
 │   └── news_crawler.py              # 新闻爬取器 + 正文提取
 │
 ├── nlp/                             # NLP 分析模块
@@ -107,11 +107,16 @@ agricultural-news-analysis/
 │       ├── css/dashboard.css        # 仪表盘样式
 │       ├── css/chatbot.css          # 浮动聊天组件样式
 │       ├── js/dashboard.js          # ECharts 图表逻辑 + 天气/市场/爬取控制
-│       └── js/chatbot.js            # 浮动聊天面板控制（iframe 加载 Gradio）
+│       ├── js/chatbot.js            # 浮动聊天面板控制（iframe 加载 Gradio）
+│       └── logo/                    # 网站图标（4 种尺寸 ICO 文件）
 │
 ├── data/                            # 运行时数据
 │   ├── agricultural_dict.txt        # jieba 自定义词典（69 个农业术语）
-│   └── agricultural_news.db         # SQLite 数据库（自动生成，唯一数据存储）
+│   ├── agricultural_news.db         # SQLite 数据库（自动生成，唯一数据存储）
+│   ├── raw/                         # 原始爬取数据备份
+│   ├── processed/                   # 已处理数据
+│   ├── analysis/                    # 分析结果导出
+│   └── models/                      # 模型缓存
 │
 └── tests/                           # 测试脚本（手动运行，无测试框架）
     ├── test_crawler.py
@@ -138,6 +143,7 @@ agricultural-news-analysis/
 | `MAX_RETRIES` | `3` | 请求失败最大重试次数 |
 | `MAX_NEWS_PER_SOURCE` | `500` | 每个新闻源最大抓取条数 |
 | `MAX_INPUT_LENGTH` | `512` | NLP 模型最大输入长度 |
+| `MAX_SUMMARY_LENGTH` | `128` | 摘要最大长度（字符） |
 | `HOT_TOPIC_WINDOW_DAYS` | `7` | 热点分析时间窗口（天） |
 | `TOP_K_KEYWORDS` | `20` | 热词提取数量 |
 | `DISASTER_NEWS_WINDOW_DAYS` | `7` | AI 灾害提取时间窗口（天） |
@@ -169,7 +175,7 @@ agricultural-news-analysis/
 | `/api/crawl` | GET | 手动触发增量爬取 + NLP 分析 + AI 灾害提取（五步流程） |
 | `/api/model-results` | GET | 模型推理结果详情，支持 `?article_id=xxx` 查单条 |
 | `/dashboard` | GET | 仪表盘页面 |
-| `/chat_app` 及 `/chat_app/{path}` | GET/POST | 反向代理至 Gradio 聊天助手（内部端口 7860） |
+| `/chat_app` 及 `/chat_app/{path}` | GET/POST | 反向代理至 Gradio 聊天助手（含 WebSocket 升级支持，内部端口 7860） |
 
 ## 数据库
 
@@ -201,6 +207,7 @@ python tests/test_nlp.py
 - **正文按需抓取**：爬虫阶段仅保存标题（content = title），NLP 分类/情感分析基于标题进行。正文抓取仅在 AI 灾害提取时按需触发（仅针对「灾害预警」类文章），抓取后回写到 `news_articles.content`。
 - **启动行为**：`main.py` 启动后立即展示最近一次的分析结果，不在启动时自动爬取。点击仪表盘「爬取实时新闻」按钮触发完整五步流程。
 - **纯数据库存储**：所有数据读写均通过 SQLite，不产生 JSON 中间文件。`analysis_results` 表在每次启动时被清空并由 `refresh_aggregate_analysis()` 重建。
+- **价格数据单位转换**：`_normalize_price()` 对爬取到的价格进行单位标准化：原始值 > 100 视为「元/吨」，除以 1000 转换为「元/公斤」；≤ 100 视为已是「元/公斤」，保持不变。
 - **`MODEL_MODE` 默认值**：`config.py` 中 `MODEL_MODE` 默认为 `"local"`（GPU 深度学习模式）。如果未安装 `transformers` 和 `torch`，模型加载会自动回退到规则引擎，但 `_classify_and_sentiment_batch()` 中有无条件 `import torch` 会导致爬取崩溃。如不使用 GPU 模型，建议将 `MODEL_MODE` 改为 `"mock"`。
 
 ## NLP 模式
