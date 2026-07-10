@@ -131,15 +131,157 @@ async def handle_market_categories(request):
 
 
 async def handle_market_prices(request):
-    """查询具体农产品价格、趋势、排名"""
+    """查询具体农产品价格、趋势、排名 — 优先使用数据库缓存"""
     commodity = request.query.get("commodity", "稻谷")
+
+    # 1. 优先从数据库缓存读取
+    try:
+        cached = get_db().get_commodity_price(commodity)
+        if cached:
+            logger.info(f"[MOA PRICE] {commodity}: 命中数据库缓存")
+            return json_resp(cached)
+    except Exception as e:
+        logger.warning(f"[MOA PRICE] {commodity} 读取缓存失败: {e}")
+
+    # 2. 数据库无缓存，实时调用 MOA API
     try:
         moa_data = _fetch_moa_api(commodity)
         if moa_data and (moa_data.get("method1") or moa_data.get("method2") or moa_data.get("method3")):
-            return json_resp(_build_response(moa_data, commodity))
+            response = _build_response(moa_data, commodity)
+            # 保存到数据库（失败不影响返回）
+            try:
+                get_db().save_commodity_prices_batch([response])
+                logger.info(f"[MOA PRICE] {commodity}: 已保存到数据库缓存")
+            except Exception as e:
+                logger.warning(f"[MOA PRICE] {commodity} 保存缓存失败: {e}")
+            return json_resp(response)
     except Exception as e:
         logger.warning(f"[MOA PRICE] {commodity}: {e}")
+
+    # 3. 所有途径失败，返回兜底模拟数据
     return json_resp(_gen_fallback_data(commodity))
+
+
+# 防止并发重复执行 fetch-all
+_fetch_all_lock = False
+
+
+async def handle_market_prices_fetch_all(request):
+    """手动提取所有22个农产品的价格数据，保存到数据库。
+
+    使用线程池并发请求 MOA API（限制并发数），所有请求完成后
+    批量写入数据库。返回每个商品的成功/失败状态。
+    """
+    global _fetch_all_lock
+    import concurrent.futures
+
+    if _fetch_all_lock:
+        return json_resp({"error": "正在提取中，请稍后再试", "success": False}, 409)
+    _fetch_all_lock = True
+
+    try:
+        all_commodities = []
+        for items in COMMODITY_CATEGORIES.values():
+            all_commodities.extend(items)
+
+        results = {}
+        errors = {}
+
+        def fetch_single(commodity: str):
+            """在线程池中执行的同步函数：获取单个商品价格"""
+            try:
+                moa_data = _fetch_moa_api(commodity)
+                if moa_data and (moa_data.get("method1") or moa_data.get("method2") or moa_data.get("method3")):
+                    resp = _build_response(moa_data, commodity)
+                    return (commodity, resp, None)
+                else:
+                    return (commodity, None, "MOA API 返回空数据")
+            except Exception as e:
+                return (commodity, None, str(e))
+
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=config.MOA_MAX_CONCURRENT) as pool:
+            futures = [loop.run_in_executor(pool, fetch_single, c) for c in all_commodities]
+            fetched = await asyncio.gather(*futures)
+
+        success_data = []
+        for commodity, data, error in fetched:
+            if data is not None:
+                results[commodity] = {
+                    "current_price": data.get("current_price", 0),
+                    "source": data.get("source", ""),
+                }
+                success_data.append(data)
+            else:
+                errors[commodity] = error
+
+        if success_data:
+            try:
+                get_db().save_commodity_prices_batch(success_data)
+            except Exception as e:
+                logger.error(f"[MOA FETCH ALL] 批量保存失败: {e}")
+                return json_resp({"error": f"数据库保存失败: {e}", "success": False}, 500)
+
+        logger.info(
+            f"[MOA FETCH ALL] 完成: {len(success_data)}/{len(all_commodities)} 成功, "
+            f"{len(errors)} 失败"
+        )
+        return json_resp({
+            "success": len(errors) == 0,
+            "total": len(all_commodities),
+            "fetched": len(success_data),
+            "failed": len(errors),
+            "results": results,
+            "errors": errors,
+        })
+    except Exception as e:
+        logger.error(f"[MOA FETCH ALL] 未预期错误: {e}")
+        return json_resp({"error": str(e), "success": False}, 500)
+    finally:
+        _fetch_all_lock = False
+
+
+async def startup_fetch_all_prices(db):
+    """启动时后台任务：如果数据库无价格缓存，则静默获取所有商品价格。
+
+    此函数不阻塞服务器启动，失败不影响正常运行。
+    """
+    try:
+        if db.has_commodity_prices():
+            logger.info("[STARTUP] 数据库中已有价格缓存，跳过启动抓取")
+            return
+
+        logger.info("[STARTUP] 开始后台抓取所有商品价格（约需 60-90 秒）...")
+        import concurrent.futures
+
+        all_commodities = []
+        for items in COMMODITY_CATEGORIES.values():
+            all_commodities.extend(items)
+
+        def fetch_single(commodity: str):
+            try:
+                moa_data = _fetch_moa_api(commodity)
+                if moa_data and (moa_data.get("method1") or moa_data.get("method2") or moa_data.get("method3")):
+                    return _build_response(moa_data, commodity)
+            except Exception as e:
+                logger.warning(f"[STARTUP] {commodity} 价格获取失败: {e}")
+            return None
+
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=config.MOA_MAX_CONCURRENT) as pool:
+            futures = [loop.run_in_executor(pool, fetch_single, c) for c in all_commodities]
+            fetched = await asyncio.gather(*futures)
+
+        success_data = [d for d in fetched if d is not None]
+        if success_data:
+            db.save_commodity_prices_batch(success_data)
+            logger.info(
+                f"[STARTUP] 后台价格抓取完成: {len(success_data)}/{len(all_commodities)} 个商品"
+            )
+        else:
+            logger.warning("[STARTUP] 后台价格抓取未获取到任何数据，MOA API 可能不可用")
+    except Exception as e:
+        logger.error(f"[STARTUP] 后台价格抓取异常 (非致命): {e}")
 
 
 # 农产品分类数据
@@ -1323,6 +1465,7 @@ def create_app():
     app.router.add_get("/api/market", handle_market)
     app.router.add_get("/api/market/categories", handle_market_categories)
     app.router.add_get("/api/market/prices", handle_market_prices)
+    app.router.add_get("/api/market/prices/fetch-all", handle_market_prices_fetch_all)
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/weather", handle_weather)
     app.router.add_get("/api/crawl", handle_crawl)

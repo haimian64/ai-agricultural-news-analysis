@@ -40,6 +40,9 @@ class Config:
     GRADIO_PORT = 7860
     CHATBOT_MODEL = "Qwen2.5-3B-Instruct"
 
+    # MOA 价格缓存
+    MOA_MAX_CONCURRENT = 3           # 批量抓取 MOA 价格时的最大并发数
+
     # 路径
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # main.py 核心修改部分
 def main():
     from backend.database import DatabaseManager
-    from backend.api import create_app, set_db_manager, refresh_aggregate_analysis, sync_disaster_and_market_from_news
+    from backend.api import create_app, set_db_manager, refresh_aggregate_analysis, sync_disaster_and_market_from_news, startup_fetch_all_prices
 
     config.ensure_dirs()
     logger.info("=== Agri News Analysis System ===")
@@ -81,6 +81,9 @@ def main():
     loop.run_until_complete(runner.setup())
     site = web.TCPSite(runner, "0.0.0.0", port)
     loop.run_until_complete(site.start())
+
+    # 启动后后台任务：静默预加载商品价格到数据库（不阻塞服务）
+    asyncio.ensure_future(startup_fetch_all_prices(db), loop=loop)
 
     logger.info(f"Server: http://localhost:{port}")
     logger.info(f"Dashboard: http://localhost:{port}/dashboard")

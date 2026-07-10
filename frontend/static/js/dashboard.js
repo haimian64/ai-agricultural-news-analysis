@@ -549,6 +549,60 @@
         }
     };
 
+    // ===== 手动提取所有农产品价格 =====
+    window.fetchAllPrices = async function() {
+        var btn = byId("btnFetchAllPrices");
+        if (!btn) return;
+        btn.disabled = true;
+        btn.textContent = "⏳ 正在提取所有价格...";
+        btn.style.opacity = "0.6";
+
+        try {
+            var result = await fetchJSON(API + "/market/prices/fetch-all");
+            if (result && result.fetched !== undefined) {
+                var msg = "价格提取: " + (result.fetched || 0) + "/" + (result.total || 0) + " 成功";
+                if (result.failed > 0) {
+                    msg += ", " + result.failed + " 失败";
+                    console.warn("价格提取失败:", result.errors);
+                }
+                setText("statusText", msg);
+                btn.textContent = "✅ 完成 (" + (result.fetched || 0) + "/" + (result.total || 0) + ")";
+
+                // 刷新当前显示的商品价格（现在从数据库读取）
+                queryPrice();
+
+                setTimeout(function() {
+                    btn.textContent = "📥 手动提取所有价格";
+                    btn.disabled = false;
+                    btn.style.opacity = "1";
+                    setText("statusText", "系统运行中");
+                }, 3000);
+            } else if (result && result.error) {
+                btn.textContent = "❌ " + result.error;
+                setTimeout(function() {
+                    btn.textContent = "📥 手动提取所有价格";
+                    btn.disabled = false;
+                    btn.style.opacity = "1";
+                }, 3000);
+            } else {
+                btn.textContent = "❌ 提取失败";
+                setTimeout(function() {
+                    btn.textContent = "📥 手动提取所有价格";
+                    btn.disabled = false;
+                    btn.style.opacity = "1";
+                }, 2000);
+            }
+        } catch(e) {
+            console.error("价格提取异常:", e);
+            btn.textContent = "❌ 网络错误";
+            btn.disabled = false;
+            btn.style.opacity = "1";
+            setTimeout(function() {
+                btn.textContent = "📥 手动提取所有价格";
+            }, 2000);
+        }
+    };
+
     // Init
     async function init() {
         var d = getDefaultDates();

@@ -68,6 +68,12 @@ class DatabaseManager:
                 analyzed_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS commodity_prices (
+                commodity TEXT PRIMARY KEY,
+                response_json TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            );
+
             -- Indexes for common query patterns
             CREATE INDEX IF NOT EXISTS idx_news_date ON news_articles(date);
             CREATE INDEX IF NOT EXISTS idx_news_category ON news_articles(category);
@@ -262,6 +268,50 @@ class DatabaseManager:
         c = self.conn.cursor()
         c.execute("SELECT * FROM market_data ORDER BY date DESC LIMIT ?", (limit,))
         return [dict(r) for r in c.fetchall()]
+
+    # ============================================================
+    # 商品价格缓存 — INSERT OR REPLACE 模式
+    # ============================================================
+    def save_commodity_prices_batch(self, price_data_list: list[dict]):
+        """批量保存商品价格，使用 INSERT OR REPLACE 覆盖写入。
+
+        每个 item 是 _build_response() 的返回值，包含 commodity/trend/
+        provinces/wholesale/current_price 等字段。
+        """
+        c = self.conn.cursor()
+        now = datetime.now().isoformat()
+        rows = []
+        for item in price_data_list:
+            rows.append((
+                item["commodity"],
+                json.dumps(item, ensure_ascii=False),
+                item.get("updated_at", now),
+            ))
+        c.executemany(
+            "INSERT OR REPLACE INTO commodity_prices (commodity, response_json, fetched_at) VALUES (?,?,?)",
+            rows,
+        )
+        self.conn.commit()
+        logger.info(f"[DB] 批量保存 {len(rows)} 条商品价格")
+
+    def get_commodity_price(self, commodity: str) -> dict | None:
+        """获取单个商品的缓存价格数据，返回解析后的 dict 或 None"""
+        c = self.conn.cursor()
+        c.execute("SELECT response_json FROM commodity_prices WHERE commodity=?", (commodity,))
+        row = c.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"[DB] 商品 {commodity} 缓存 JSON 解析失败，将重新获取")
+            return None
+
+    def has_commodity_prices(self) -> bool:
+        """检查数据库中是否已有任何商品价格缓存"""
+        c = self.conn.cursor()
+        c.execute("SELECT COUNT(*) FROM commodity_prices")
+        return c.fetchone()[0] > 0
 
     def get_active_disasters(self, limit=100):
         c = self.conn.cursor()
