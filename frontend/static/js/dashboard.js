@@ -322,10 +322,10 @@
         var container = byId("disasterList");
         if (!container) return;
         var lc = {1: "level-1", 2: "level-2", 3: "level-3", 4: "level-4"};
-        var bc = {1: "badge-red", 2: "badge-orange", 3: "badge-yellow", 4: "badge-blue"};
-        var ll = {1: "红色", 2: "橙色", 3: "黄色", 4: "蓝色"};
+        var bc = {1: "badge-red", 2: "badge-orange", 3: "badge-yellow", 4: "badge-blue", 0: "badge-gray"};
+        var ll = {1: "红色", 2: "橙色", 3: "黄色", 4: "蓝色", 0: "无预警"};
         container.innerHTML = d.length ? d.map(function (x) {
-            var sev = x.severity || 99;
+            var sev = x.severity != null ? x.severity : 99;
             var lvl = sev <= 4 ? sev : 99;
             var url = x.url || "";
             var title = x.title || "未知";

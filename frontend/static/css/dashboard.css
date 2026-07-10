@@ -111,6 +111,7 @@ body {
 .badge-orange { background: #e67e22; color: #fff; }
 .badge-yellow { background: #f1c40f; color: #333; }
 .badge-blue { background: #3498db; color: #fff; }
+.badge-gray { background: #95a5a6; color: #fff; }
 /* ===== 市场动态 ===== */
 .market-page { padding: 16px 24px; }
 .market-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }

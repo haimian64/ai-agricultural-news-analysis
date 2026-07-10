@@ -262,9 +262,14 @@ class DatabaseManager:
         c.execute("SELECT * FROM market_data ORDER BY date DESC LIMIT ?", (limit,))
         return [dict(r) for r in c.fetchall()]
 
-    def get_active_disasters(self, limit=50):
+    def get_active_disasters(self, limit=100):
         c = self.conn.cursor()
-        c.execute("SELECT * FROM disaster_warnings ORDER BY severity ASC LIMIT ?", (limit,))
+        c.execute("""
+            SELECT * FROM disaster_warnings
+            ORDER BY CASE WHEN severity = 0 OR severity = 99 THEN 1 ELSE 0 END,
+                     severity ASC
+            LIMIT ?
+        """, (limit,))
         return [dict(r) for r in c.fetchall()]
 
     def get_already_extracted_disaster_ids(self, article_ids: list[str]) -> set[str]:
