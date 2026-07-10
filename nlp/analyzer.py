@@ -14,12 +14,25 @@ class HotTopicAnalyzer:
     """Hot topic and trend analyzer"""
 
     def __init__(self):
-        dict_path = Path(__file__).parent.parent / "data" / "agricultural_dict.txt"
+        base = Path(__file__).parent.parent / "data"
+        dict_path = base / "agricultural_dict.txt"
         if dict_path.exists():
             jieba.load_userdict(str(dict_path))
             logger.info(f"已加载农业自定义词典: {dict_path}")
         else:
             logger.warning(f"农业词典未找到: {dict_path}")
+
+        # 加载停用词黑名单
+        self._stopwords: set[str] = set()
+        sw_path = base / "stopwords.txt"
+        if sw_path.exists():
+            for line in sw_path.read_text(encoding="utf-8").splitlines():
+                w = line.strip()
+                if w and not w.startswith("#"):
+                    self._stopwords.add(w)
+            logger.info(f"已加载停用词黑名单: {len(self._stopwords)} 个")
+        else:
+            logger.warning(f"停用词黑名单未找到: {sw_path}")
 
     def extract_keywords(self, texts, top_k=20):
         """TF-based keyword extraction using jieba segmentation"""
@@ -41,8 +54,16 @@ class HotTopicAnalyzer:
 
         counter = Counter(words)
         total = sum(counter.values()) or 1
-        return [{"word": w, "weight": round(c / total, 4)}
-                for w, c in counter.most_common(top_k) if len(w) > 1]
+        result = []
+        for w, c in counter.most_common(top_k * 2 + len(self._stopwords)):
+            if len(w) <= 1:
+                continue
+            if w in self._stopwords:
+                continue
+            result.append({"word": w, "weight": round(c / total, 4)})
+            if len(result) >= top_k:
+                break
+        return result
 
     def category_distribution(self, articles):
         counter = Counter(a.get("category", "综合资讯") for a in articles)
