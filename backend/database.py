@@ -19,11 +19,12 @@ class DatabaseManager:
     @property
     def conn(self):
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
+            self._conn.execute("PRAGMA wal_autocheckpoint=1000")  # WAL 达 ~4MB 自动合并
             self._init_tables()
         return self._conn
 
