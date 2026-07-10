@@ -133,10 +133,37 @@ def _build_system_prompt(db) -> str:
         except Exception:
             pass
 
+        # --- 农产品价格概览 ---
+        price_text = "暂无价格数据（请点击「手动提取所有价格」获取）"
+        price_fetched_at = ""
+        try:
+            all_prices = []
+            from backend.api import COMMODITY_CATEGORIES
+            for cat, items in COMMODITY_CATEGORIES.items():
+                cat_prices = []
+                for commodity in items:
+                    cached = db.get_commodity_price(commodity)
+                    if cached:
+                        p = cached.get("current_price", 0)
+                        chg = cached.get("change", 0)
+                        dir_sign = "↑" if chg > 0 else ("↓" if chg < 0 else "→")
+                        cat_prices.append(f"{commodity} {p}元 {dir_sign}")
+                if cat_prices:
+                    all_prices.append(f"  {cat}：" + " | ".join(cat_prices))
+            if all_prices:
+                # Get the latest fetched_at from any commodity
+                first = db.get_commodity_price(list(COMMODITY_CATEGORIES.values())[0][0])
+                if first:
+                    price_fetched_at = first.get("updated_at", "")
+                price_text = "\n".join(all_prices)
+        except Exception:
+            pass
+
     except Exception as e:
         logger.error(f"[Chatbot] 构建系统提示失败: {e}")
         total_news = total_disasters = analyzed = 0
-        cat_summary = sentiment_text = recent_news_text = disasters_text = "获取失败"
+        cat_summary = sentiment_text = recent_news_text = disasters_text = price_text = "获取失败"
+        price_fetched_at = ""
 
     now = datetime.now()
     weekdays = ["一", "二", "三", "四", "五", "六", "日"]
@@ -149,7 +176,7 @@ def _build_system_prompt(db) -> str:
     date_table = "\n".join(date_lines)
     tomorrow_iso = (now + timedelta(days=1)).strftime("%Y-%m-%d")  # for format hint
 
-    prompt = f"""你是一个专业的农业新闻分析助手。你可以帮助用户了解最新的农业新闻、灾害预警、市场动态和舆情分析。
+    prompt = f"""你是一个专业的农业新闻分析助手。你可以帮助用户了解最新的农业新闻、灾害预警、市场动态、农产品价格和舆情分析。
 
 ## 日期速查表
 {date_table}
@@ -169,6 +196,9 @@ get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「�
 ## 活跃灾害预警
 {disasters_text}
 
+## 农产品价格概览{" (更新时间: " + price_fetched_at + ")" if price_fetched_at else ""}
+{price_text}
+
 ## 可用工具
 当用户需要更具体的数据时，你可以使用以下工具格式调用：
 <tool_call>
@@ -183,6 +213,15 @@ get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「�
 - get_sentiment_summary：获取舆情分析总结（无参数）
 - get_news_by_category：按分类查询新闻（参数：category，可选值：政策法规、市场行情、农业科技、灾害预警、国际农业、综合资讯）
 - get_weather：查询指定城市的天气（参数：city，如"北京"、"上海"、"广州"等）
+- get_price_overview：获取所有农产品价格概览（无参数），返回每个品种的当前价格和涨跌
+- get_price_detail：查询某个农产品的详细价格数据（参数：commodity，如"稻谷"、"生猪"、"玉米"），返回价格、趋势、各省均价、批发市场排名
+
+## 价格分析能力
+你可以对价格数据进行分析，包括但不限于：
+- 用户问「哪个品种价格最高/最低」→ 基于上方价格概览直接回答，无需调用工具
+- 用户问「稻谷价格多少」「玉米多少钱」→ 在价格概览中查找对应品种，直接回答
+- 用户问「价格趋势怎么样」「最近涨价了还是降价了」→ 概览中 ↑/↓ 箭头指示涨跌方向
+- 用户问「某个品种的详细分析」「各省价格对比」→ 调用 get_price_detail 获取完整数据
 
 ## 工具调用格式（重要！）
 当你需要调用工具时，必须严格按照以下 XML 格式输出，不要输出裸 JSON：
@@ -200,7 +239,7 @@ get_weather 的 daily.time 字段使用 YYYY-MM-DD 格式，例如上表中「�
 
 ## 注意事项
 - 回答要简洁、专业，使用中文
-- 当用户询问数据库中的信息时，优先基于上方已有的「当前数据库统计」「最近新闻」「活跃灾害预警」回答
+- 当用户询问数据库中的信息时，优先基于上方已有的「当前数据库统计」「最近新闻」「活跃灾害预警」「农产品价格概览」回答
 - 只有当用户要求更详细的搜索、或查询的信息不在已有上下文中时，才使用工具调用
 - 工具调用必须用 <tool_call> 标签包裹，不要直接输出 JSON
 - 不要编造数据，如果数据库中没有相关信息，诚实告知用户
@@ -283,6 +322,51 @@ def _query_weather(city: str) -> str:
         return json.dumps({"error": f"天气查询失败: {e}", "city": city}, ensure_ascii=False)
 
 
+def _get_price_overview(db) -> str:
+    """获取所有农产品价格概览（紧凑格式）"""
+    from backend.api import COMMODITY_CATEGORIES
+    all_prices = []
+    for cat, items in COMMODITY_CATEGORIES.items():
+        cat_data = {"category": cat, "items": []}
+        for commodity in items:
+            cached = db.get_commodity_price(commodity)
+            if cached:
+                cat_data["items"].append({
+                    "commodity": commodity,
+                    "current_price": cached.get("current_price", 0),
+                    "change": cached.get("change", 0),
+                    "change_pct": cached.get("change_pct", 0),
+                    "national_avg": cached.get("national_avg", 0),
+                    "unit": cached.get("unit", "元/公斤"),
+                })
+        if cat_data["items"]:
+            all_prices.append(cat_data)
+    return json.dumps({
+        "total_categories": len(all_prices),
+        "total_commodities": sum(len(c["items"]) for c in all_prices),
+        "categories": all_prices,
+    }, ensure_ascii=False)
+
+
+def _get_price_detail(db, commodity: str) -> str:
+    """获取单个农产品的详细价格数据"""
+    cached = db.get_commodity_price(commodity)
+    if not cached:
+        # Try fuzzy match
+        from backend.api import COMMODITY_CATEGORIES
+        for items in COMMODITY_CATEGORIES.values():
+            for item in items:
+                if commodity in item or item in commodity:
+                    cached = db.get_commodity_price(item)
+                    if cached:
+                        break
+            if cached:
+                break
+    if not cached:
+        return json.dumps({"error": f"未找到「{commodity}」的价格数据。请使用具体品种名如：稻谷、小麦、玉米、猪、大白菜等"}, ensure_ascii=False)
+    return json.dumps(cached, ensure_ascii=False)
+
+
 def _make_tool_handlers(db):
     """Create tool dispatch table bound to a DatabaseManager instance."""
     return {
@@ -299,6 +383,8 @@ def _make_tool_handlers(db):
         "get_news_by_category": lambda category="", **kw: json.dumps(
             db.get_all_news(limit=10, category=category), ensure_ascii=False, default=str),
         "get_weather": lambda city="", **kw: _query_weather(city),
+        "get_price_overview": lambda **kw: _get_price_overview(db),
+        "get_price_detail": lambda commodity="", **kw: _get_price_detail(db, commodity),
     }
 
 
@@ -324,6 +410,7 @@ def _parse_tool_calls(text: str) -> list[dict]:
     known_tools = {
         "get_statistics", "search_news", "get_recent_news", "get_disasters",
         "get_sentiment_summary", "get_news_by_category", "get_weather",
+        "get_price_overview", "get_price_detail",
     }
     for match in re.finditer(r"\{", text):
         start = match.start()
@@ -530,6 +617,7 @@ def chat_fn(message: str, history: list, request: any = None):
         known_tool_names = (
             "get_statistics|search_news|get_recent_news|get_disasters"
             "|get_sentiment_summary|get_news_by_category|get_weather"
+            "|get_price_overview|get_price_detail"
         )
         display_text = re.sub(
             r'\{\s*"name"\s*:\s*"(' + known_tool_names + r')"[^}]*\}',

@@ -36,26 +36,54 @@
     50% { box-shadow: 0 4px 28px rgba(46, 134, 193, 0.6); }
 }
 
-/* ---- Chat Panel ---- */
+/* ---- Chat Panel (right-side drawer, 3/8 width, full height) ---- */
 .chatbot-panel {
     position: fixed;
-    bottom: -620px;            /* hidden by default */
-    right: 24px;
-    width: 420px;
-    height: 560px;
-    max-height: calc(100vh - 40px);
+    top: 0;
+    right: -50vw;               /* hidden off-screen to the right */
+    width: 37.5vw;              /* 3/8 of viewport width */
+    min-width: 360px;
+    max-width: 720px;
+    height: 100vh;
     background: #fff;
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.18);
+    border-radius: 12px 0 0 12px;
+    box-shadow: -4px 0 32px rgba(0, 0, 0, 0.18);
     z-index: 10000;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: right 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chatbot-panel.open {
-    bottom: 0;
+    right: 0;
+}
+
+/* ---- Resize Handle (left edge) ---- */
+.chatbot-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.chatbot-resize-handle:hover,
+.chatbot-resize-handle.active {
+    background: rgba(26, 82, 118, 0.3);
+}
+
+/* Prevent iframe from capturing mouse events during resize */
+.chatbot-panel.resizing .chatbot-panel-body {
+    pointer-events: none;
+}
+.chatbot-panel.resizing {
+    transition: none;           /* disable animation during drag */
+    user-select: none;
 }
 
 /* ---- Panel Header ---- */
@@ -106,16 +134,15 @@
 }
 
 /* ---- Responsive: full-screen on narrow devices ---- */
-@media (max-width: 480px) {
+@media (max-width: 720px) {
     .chatbot-panel {
-        width: 100%;
-        right: 0;
-        height: 100vh;
-        max-height: 100vh;
+        width: 100vw;
+        min-width: unset;
+        max-width: unset;
+        right: -100vw;
         border-radius: 0;
-        bottom: -100vh;
     }
-    .chatbot-panel.open {
-        bottom: 0;
+    .chatbot-resize-handle {
+        display: none;          /* no resize on mobile */
     }
 }
